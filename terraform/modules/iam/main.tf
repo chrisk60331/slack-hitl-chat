@@ -1,6 +1,6 @@
 # Lambda Execution Role
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "agentcore-lambda-execution-role"
+  name = "${var.name_prefix}-lambda-execution-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -15,10 +15,9 @@ resource "aws_iam_role" "lambda_execution_role" {
     ]
   })
 
-  tags = {
-    Name        = "agentcore-lambda-execution-role"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-lambda-execution-role"
+  })
 }
 
 # Lambda Basic Execution Policy
@@ -29,14 +28,14 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 # Lambda VPC Execution Policy (only attached when Lambda is deployed in VPC)
 resource "aws_iam_role_policy_attachment" "lambda_vpc_execution" {
-  count      = length(local.private_subnet_ids) > 0 ? 1 : 0
+  count      = length(var.private_subnet_ids) > 0 ? 1 : 0
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 # ECR Access Policy for Lambda (to pull Docker images)
 resource "aws_iam_policy" "lambda_ecr_policy" {
-  name        = "agentcore-lambda-ecr-policy"
+  name        = "${var.name_prefix}-lambda-ecr-policy"
   description = "IAM policy for Lambda to access ECR"
 
   policy = jsonencode({
@@ -63,7 +62,7 @@ resource "aws_iam_role_policy_attachment" "lambda_ecr_policy_attachment" {
 
 # DynamoDB Access Policy for Lambda
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
-  name        = "agentcore-lambda-dynamodb-policy"
+  name        = "${var.name_prefix}-lambda-dynamodb-policy"
   description = "IAM policy for Lambda to access DynamoDB"
 
   policy = jsonencode({
@@ -79,12 +78,7 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           "dynamodb:Query",
           "dynamodb:Scan"
         ]
-        Resource = [
-          aws_dynamodb_table.agentcore_approval_log.arn,
-          aws_dynamodb_table.agentcore_state_machine.arn,
-          "${aws_dynamodb_table.agentcore_approval_log.arn}/index/*",
-          "${aws_dynamodb_table.agentcore_state_machine.arn}/index/*"
-        ]
+        Resource = var.dynamodb_table_arns
       }
     ]
   })
@@ -97,7 +91,7 @@ resource "aws_iam_role_policy_attachment" "lambda_dynamodb_policy_attachment" {
 
 # SNS and SES Policy for Lambda (for notifications)
 resource "aws_iam_policy" "lambda_notification_policy" {
-  name        = "agentcore-lambda-notification-policy"
+  name        = "${var.name_prefix}-lambda-notification-policy"
   description = "IAM policy for Lambda to send notifications"
 
   policy = jsonencode({
@@ -117,7 +111,7 @@ resource "aws_iam_policy" "lambda_notification_policy" {
         Action = [
           "lambda:GetFunctionUrlConfig"
         ]
-        Resource = aws_lambda_function.agentcore_hitl_approval.arn
+        Resource = var.lambda_function_arn != "" ? var.lambda_function_arn : "*"
       }
     ]
   })
@@ -130,7 +124,7 @@ resource "aws_iam_role_policy_attachment" "lambda_notification_policy_attachment
 
 # Step Functions Execution Role
 resource "aws_iam_role" "step_functions_execution_role" {
-  name = "agentcore-step-functions-execution-role"
+  name = "${var.name_prefix}-step-functions-execution-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -145,15 +139,14 @@ resource "aws_iam_role" "step_functions_execution_role" {
     ]
   })
 
-  tags = {
-    Name        = "agentcore-step-functions-execution-role"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-step-functions-execution-role"
+  })
 }
 
 # Step Functions Lambda Invoke Policy
 resource "aws_iam_policy" "step_functions_lambda_policy" {
-  name        = "agentcore-step-functions-lambda-policy"
+  name        = "${var.name_prefix}-step-functions-lambda-policy"
   description = "IAM policy for Step Functions to invoke Lambda"
 
   policy = jsonencode({
@@ -177,7 +170,7 @@ resource "aws_iam_role_policy_attachment" "step_functions_lambda_policy_attachme
 
 # Step Functions DynamoDB Policy
 resource "aws_iam_policy" "step_functions_dynamodb_policy" {
-  name        = "agentcore-step-functions-dynamodb-policy"
+  name        = "${var.name_prefix}-step-functions-dynamodb-policy"
   description = "IAM policy for Step Functions to access DynamoDB"
 
   policy = jsonencode({
@@ -193,12 +186,7 @@ resource "aws_iam_policy" "step_functions_dynamodb_policy" {
           "dynamodb:Query",
           "dynamodb:Scan"
         ]
-        Resource = [
-          aws_dynamodb_table.agentcore_approval_log.arn,
-          aws_dynamodb_table.agentcore_state_machine.arn,
-          "${aws_dynamodb_table.agentcore_approval_log.arn}/index/*",
-          "${aws_dynamodb_table.agentcore_state_machine.arn}/index/*"
-        ]
+        Resource = var.dynamodb_table_arns
       }
     ]
   })
@@ -211,7 +199,7 @@ resource "aws_iam_role_policy_attachment" "step_functions_dynamodb_policy_attach
 
 # Step Functions CloudWatch Logs Policy
 resource "aws_iam_policy" "step_functions_logs_policy" {
-  name        = "agentcore-step-functions-logs-policy"
+  name        = "${var.name_prefix}-step-functions-logs-policy"
   description = "IAM policy for Step Functions to write to CloudWatch logs"
 
   policy = jsonencode({
@@ -242,7 +230,7 @@ resource "aws_iam_role_policy_attachment" "step_functions_logs_policy_attachment
 
 # AgentCore Application Role (for EC2/ECS/EKS)
 resource "aws_iam_role" "agentcore_app_role" {
-  name = "agentcore-app-role"
+  name = "${var.name_prefix}-app-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -260,15 +248,14 @@ resource "aws_iam_role" "agentcore_app_role" {
     ]
   })
 
-  tags = {
-    Name        = "agentcore-app-role"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-app-role"
+  })
 }
 
 # Bedrock Access Policy for AgentCore App
 resource "aws_iam_policy" "agentcore_bedrock_policy" {
-  name        = "agentcore-bedrock-policy"
+  name        = "${var.name_prefix}-bedrock-policy"
   description = "IAM policy for AgentCore to access Bedrock"
 
   policy = jsonencode({
@@ -299,7 +286,7 @@ resource "aws_iam_role_policy_attachment" "agentcore_dynamodb_policy_attachment"
 
 # Step Functions Access Policy for AgentCore App
 resource "aws_iam_policy" "agentcore_stepfunctions_policy" {
-  name        = "agentcore-stepfunctions-policy"
+  name        = "${var.name_prefix}-stepfunctions-policy"
   description = "IAM policy for AgentCore to start Step Functions executions"
 
   policy = jsonencode({
@@ -326,14 +313,60 @@ resource "aws_iam_role_policy_attachment" "agentcore_stepfunctions_policy_attach
 
 # Instance Profile for EC2
 resource "aws_iam_instance_profile" "agentcore_instance_profile" {
-  name = "agentcore-instance-profile"
+  name = "${var.name_prefix}-instance-profile"
   role = aws_iam_role.agentcore_app_role.name
+}
+
+# EventBridge Role for invoking Step Functions
+resource "aws_iam_role" "eventbridge_role" {
+  name = "${var.name_prefix}-eventbridge-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-eventbridge-role"
+  })
+}
+
+# IAM Policy for EventBridge to invoke Step Functions
+resource "aws_iam_policy" "eventbridge_stepfunctions_policy" {
+  name        = "${var.name_prefix}-eventbridge-stepfunctions-policy"
+  description = "IAM policy for EventBridge to invoke Step Functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "states:StartExecution"
+        ]
+        Resource = var.stepfunctions_arn != "" ? var.stepfunctions_arn : "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eventbridge_stepfunctions_policy_attachment" {
+  role       = aws_iam_role.eventbridge_role.name
+  policy_arn = aws_iam_policy.eventbridge_stepfunctions_policy.arn
 }
 
 # Optional: Bedrock Guardrails Policies
 resource "aws_iam_policy" "bedrock_guardrails_policy" {
   count       = var.enable_bedrock_guardrails ? 1 : 0
-  name        = "agentcore-bedrock-guardrails-policy"
+  name        = "${var.name_prefix}-bedrock-guardrails-policy"
   description = "IAM policy for Bedrock Guardrails"
 
   policy = jsonencode({

@@ -1,6 +1,6 @@
 # DynamoDB Table for AgentCore Approval Log
 resource "aws_dynamodb_table" "agentcore_approval_log" {
-  name           = "agentcore-approval-log"
+  name           = "${var.name_prefix}-approval-log"
   billing_mode   = "PAY_PER_REQUEST"
   hash_key       = "request_id"
 
@@ -44,16 +44,15 @@ resource "aws_dynamodb_table" "agentcore_approval_log" {
     enabled = true
   }
 
-  tags = {
-    Name        = "agentcore-approval-log"
-    Environment = var.environment
-    Purpose     = "Human-in-the-loop approval logging"
-  }
+  tags = merge(var.tags, {
+    Name    = "${var.name_prefix}-approval-log"
+    Purpose = "Human-in-the-loop approval logging"
+  })
 }
 
 # DynamoDB Table for Step Functions state tracking
 resource "aws_dynamodb_table" "agentcore_state_machine" {
-  name           = "agentcore-state-machine"
+  name           = "${var.name_prefix}-state-machine"
   billing_mode   = "PAY_PER_REQUEST"
   hash_key       = "execution_arn"
 
@@ -90,9 +89,8 @@ resource "aws_dynamodb_table" "agentcore_state_machine" {
     enabled = true
   }
 
-  tags = {
-    Name        = "agentcore-state-machine"
-    Environment = var.environment
-    Purpose     = "Step Functions execution tracking"
-  }
+  tags = merge(var.tags, {
+    Name    = "${var.name_prefix}-state-machine"
+    Purpose = "Step Functions execution tracking"
+  })
 } 

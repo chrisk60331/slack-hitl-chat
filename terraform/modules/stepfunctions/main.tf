@@ -1,18 +1,17 @@
 # CloudWatch Log Group for Step Functions
 resource "aws_cloudwatch_log_group" "step_functions_log_group" {
-  name              = "/aws/stepfunctions/agentcore-hitl-workflow"
+  name              = "/aws/stepfunctions/${var.name_prefix}-hitl-workflow"
   retention_in_days = 14
 
-  tags = {
-    Name        = "agentcore-stepfunctions-logs"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-stepfunctions-logs"
+  })
 }
 
 # Step Functions State Machine for HITL Workflow
 resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
-  name     = "agentcore-hitl-workflow"
-  role_arn = aws_iam_role.step_functions_execution_role.arn
+  name     = "${var.name_prefix}-hitl-workflow"
+  role_arn = var.step_functions_execution_role_arn
 
   definition = jsonencode({
     Comment = "AgentCore Human-in-the-Loop Approval Workflow"
@@ -20,7 +19,7 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
     States = {
       RequestApproval = {
         Type     = "Task"
-        Resource = aws_lambda_function.agentcore_hitl_approval.arn
+        Resource = var.lambda_function_arn
         Parameters = {
           "Input.$" = "$"
         }
@@ -103,15 +102,14 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
     level                 = "ERROR"
   }
 
-  tags = {
-    Name        = "agentcore-hitl-workflow"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-hitl-workflow"
+  })
 }
 
 # EventBridge Rule for triggering workflows
 resource "aws_cloudwatch_event_rule" "agentcore_trigger" {
-  name        = "agentcore-hitl-trigger"
+  name        = "${var.name_prefix}-hitl-trigger"
   description = "Trigger AgentCore HITL workflow"
 
   event_pattern = jsonencode({
@@ -122,10 +120,9 @@ resource "aws_cloudwatch_event_rule" "agentcore_trigger" {
     }
   })
 
-  tags = {
-    Name        = "agentcore-trigger"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-trigger"
+  })
 }
 
 # EventBridge Target for Step Functions
@@ -133,52 +130,14 @@ resource "aws_cloudwatch_event_target" "step_functions_target" {
   rule      = aws_cloudwatch_event_rule.agentcore_trigger.name
   target_id = "AgentCoreStepFunctionsTarget"
   arn       = aws_sfn_state_machine.agentcore_hitl_workflow.arn
-  role_arn  = aws_iam_role.eventbridge_role.arn
+  role_arn  = var.eventbridge_role_arn
 }
 
-# IAM Role for EventBridge to invoke Step Functions
-resource "aws_iam_role" "eventbridge_role" {
-  name = "agentcore-eventbridge-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "events.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "agentcore-eventbridge-role"
-    Environment = var.environment
-  }
-}
-
-# IAM Policy for EventBridge to invoke Step Functions
-resource "aws_iam_policy" "eventbridge_stepfunctions_policy" {
-  name        = "agentcore-eventbridge-stepfunctions-policy"
-  description = "IAM policy for EventBridge to invoke Step Functions"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "states:StartExecution"
-        ]
-        Resource = aws_sfn_state_machine.agentcore_hitl_workflow.arn
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "eventbridge_stepfunctions_policy_attachment" {
-  role       = aws_iam_role.eventbridge_role.name
-  policy_arn = aws_iam_policy.eventbridge_stepfunctions_policy.arn
+# Lambda permission for Step Functions
+resource "aws_lambda_permission" "step_functions_lambda" {
+  statement_id  = "AllowExecutionFromStepFunctions"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_function_name
+  principal     = "states.amazonaws.com"
+  source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
 } 

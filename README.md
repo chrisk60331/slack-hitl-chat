@@ -1,350 +1,322 @@
 # AgentCore Marketplace
 
-AWS Bedrock AgentCore-based human-in-the-loop system using Docker containers and Terraform for infrastructure.
+A robust, scalable marketplace infrastructure for AI agents with human-in-the-loop approval workflows, built using AWS serverless technologies and Terraform.
 
-## Features
+## 🏗️ Architecture
 
-- **Docker-based Lambda Functions**: Uses container images instead of zip files for better dependency management
-- **UV Package Manager**: Fast Python package installation and dependency resolution  
-- **Terraform Infrastructure**: Complete AWS infrastructure as code
-- **Human-in-the-Loop Workflow**: Step Functions orchestrated approval process
-- **MCP Server Integration**: Native Model Context Protocol server with HITL approval middleware
-- **Risk-based Approval**: Intelligent risk evaluation with configurable approval thresholds
-- **Multiple Notification Channels**: Slack, Microsoft Teams, and SNS support
-- **DynamoDB Logging**: Persistent approval logs with TTL
-- **VPC Support**: Optional deployment in existing VPC infrastructure
-- **CLI Management**: Command-line tools for configuration and monitoring
+This project implements a multi-environment, DRY (Don't Repeat Yourself) infrastructure setup using Terraform modules and remote state management.
 
-## Architecture
+### Key Components
 
-The system consists of:
+- **Lambda Functions**: Docker-based functions for approval processing
+- **Step Functions**: Orchestrate human-in-the-loop workflows
+- **DynamoDB**: Store approval logs and state machine data
+- **SNS**: Notifications and messaging
+- **EventBridge**: Event-driven workflow triggers
+- **VPC**: Network isolation and security
+- **IAM**: Fine-grained access control
 
-1. **MCP Server**: Human-in-the-Loop middleware that intercepts and evaluates MCP requests
-2. **Lambda Function** (Docker container): Processes approval requests and sends notifications
-3. **Step Functions**: Orchestrates the human-in-the-loop workflow
-4. **DynamoDB**: Stores approval logs and state machine data
-5. **ECR Repository**: Stores the Lambda Docker images
-6. **SNS/Slack/Teams**: Notification channels for approvals
-7. **Risk Evaluator**: Intelligent assessment of operation risk levels
-
-## Prerequisites
-
-- AWS CLI configured with appropriate permissions
-- Terraform >= 1.0
-- Docker
-- UV (Python package manager)
-- Python >= 3.11
-
-## Quick Start
-
-1. **Check Dependencies**:
-   ```bash
-   ./build_and_deploy.sh check
-   ```
-
-2. **Configure Variables**:
-   ```bash
-   cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-   # Edit terraform.tfvars with your settings
-   ```
-
-3. **Deploy Infrastructure**:
-   ```bash
-   ./build_and_deploy.sh deploy
-   ```
-
-4. **Configure MCP Server**:
-   ```bash
-   # Generate MCP configuration
-   uv run hitl-mcp generate-config --lambda-url $LAMBDA_FUNCTION_URL --output mcp-config.json
-   
-   # Start HITL MCP server
-   uv run hitl-mcp serve --lambda-url $LAMBDA_FUNCTION_URL
-   ```
-
-## Deployment Options
-
-### Full Deployment
-```bash
-# Check dependencies, initialize Terraform, plan, and apply
-./build_and_deploy.sh deploy
-```
-
-### Step-by-Step Deployment
-```bash
-# 1. Check dependencies
-./build_and_deploy.sh check
-
-# 2. Build Docker image locally (optional)
-./build_and_deploy.sh build
-
-# 3. Initialize Terraform
-./build_and_deploy.sh init
-
-# 4. Plan deployment
-./build_and_deploy.sh plan
-
-# 5. Apply deployment
-./build_and_deploy.sh apply
-```
-
-### Local Testing
-```bash
-# Build and test Docker image locally
-./build_and_deploy.sh test
-```
-
-## Configuration
-
-### Terraform Variables
-
-Create `terraform/terraform.tfvars`:
-
-```hcl
-aws_region = "us-east-1"
-environment = "prod"
-
-# Notification webhooks (optional)
-slack_webhook_url = "https://hooks.slack.com/services/..."
-teams_webhook_url = "https://outlook.office.com/webhook/..."
-
-# VPC configuration (if using existing VPC)
-use_existing_vpc = true
-vpc_id = "vpc-xxxxxxxxx"
-private_subnet_ids = ["subnet-xxxxxxxx", "subnet-yyyyyyyy"]
-lambda_security_group_id = "sg-xxxxxxxxx"
-
-# Lambda configuration
-lambda_timeout = 30
-lambda_memory_size = 256
-```
-
-### Environment Variables
-
-The Lambda function uses these environment variables (automatically configured):
-
-- `TABLE_NAME`: DynamoDB table name for approval logs
-- `SLACK_WEBHOOK_URL`: Slack webhook URL for notifications
-- `TEAMS_WEBHOOK_URL`: Microsoft Teams webhook URL
-- `SNS_TOPIC_ARN`: SNS topic ARN for notifications
-
-## Docker Build Process
-
-The deployment uses Docker containers for Lambda functions:
-
-1. **Base Image**: AWS Lambda Python 3.11 runtime
-2. **Package Manager**: UV for fast dependency installation
-3. **Dependencies**: Installed from `pyproject.toml`
-4. **Registry**: Amazon ECR for image storage
-5. **Deployment**: Terraform manages the complete lifecycle
-
-### Dockerfile Features
-
-- Multi-stage build with UV package manager
-- Optimized layer caching
-- AWS Lambda runtime compatibility
-- Automatic dependency resolution from pyproject.toml
-
-## MCP Server Usage
-
-### Starting the HITL MCP Server
-
-```bash
-# Using CLI with options
-uv run hitl-mcp serve \
-  --lambda-url https://your-lambda-url.aws.com \
-  --approver admin \
-  --timeout 3600 \
-  --auto-approve-low-risk
-
-# Using environment variables
-export LAMBDA_FUNCTION_URL=https://your-lambda-url.aws.com
-export DEFAULT_APPROVER=security_team
-uv run hitl-mcp serve
-
-# Using configuration file
-uv run hitl-mcp init-config --output hitl-config.json
-# Edit hitl-config.json with your settings
-uv run hitl-mcp serve --config-file hitl-config.json
-```
-
-### MCP Configuration
-
-Generate MCP client configuration:
-
-```bash
-uv run hitl-mcp generate-config \
-  --lambda-url https://your-lambda-url.aws.com \
-  --table-name your-dynamodb-table \
-  --sns-topic-arn arn:aws:sns:region:account:topic \
-  --output mcp-hitl-config.json
-```
-
-Add to your MCP client configuration:
-
-```json
-{
-  "mcpServers": {
-    "hitl-approval": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "src.mcp_server"],
-      "cwd": "/path/to/agentcore_marketplace",
-      "env": {
-        "LAMBDA_FUNCTION_URL": "https://your-lambda-url.aws.com",
-        "DEFAULT_APPROVER": "admin",
-        "APPROVAL_TIMEOUT": "1800"
-      }
-    }
-  }
-}
-```
-
-### Risk Evaluation
-
-The system automatically evaluates risk levels for all MCP requests:
-
-- **LOW**: Read-only operations (tools/list, resources/list)
-- **MEDIUM**: Standard operations with moderate risk  
-- **HIGH**: File operations, network requests, shell commands
-- **CRITICAL**: System files, destructive commands, database operations
-
-### Managing Approvals
-
-```bash
-# Check approval status
-uv run hitl-mcp check-approval \
-  --lambda-url https://your-lambda-url.aws.com \
-  --request-id abc123
-
-# Monitor via MCP tools
-# Use approval_status tool in your MCP client
-# Use list_pending_approvals tool to see pending requests
-```
-
-## API Usage
-
-### Approval Request Format
-
-```json
-{
-  "request_id": "unique-request-id",
-  "action": "approve|reject|pending",
-  "requester": "user-id",
-  "agent_prompt": "Original agent prompt",
-  "proposed_action": "Action to be taken",
-  "reason": "Reason for decision",
-  "approver": "approver-id"
-}
-```
-
-### Response Format
-
-```json
-{
-  "request_id": "unique-request-id",
-  "status": "approve|reject|pending",
-  "timestamp": "2024-01-01T00:00:00Z",
-  "notification_sent": true
-}
-```
-
-### MCP Request Flow
-
-1. **Request Interception**: MCP server intercepts all tool calls
-2. **Risk Evaluation**: Automatic assessment of operation risk level
-3. **Approval Decision**: High/Critical risk operations require approval
-4. **Notification**: Approval requests sent via configured channels
-5. **Response**: Operation proceeds only after approval granted
-
-## Development
-
-### Project Structure
+## 📁 Project Structure
 
 ```
 agentcore_marketplace/
-├── agentcore_marketplace/          # Core Python package
-├── lambda/                         # Lambda function code
-├── terraform/                      # Infrastructure as code
-├── Dockerfile                      # Container definition
-├── pyproject.toml                  # Python dependencies
-├── build_and_deploy.sh            # Deployment script
-└── README.md                       # Documentation
+├── src/                           # Application source code
+│   ├── __init__.py
+│   ├── approval_handler.py        # Lambda function handler
+│   ├── cli.py                     # CLI interface
+│   └── mcp_server.py             # MCP server implementation
+├── terraform/                     # Infrastructure as Code
+│   ├── bootstrap/                 # Remote state backend setup
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── terraform.tfvars
+│   ├── modules/                   # Reusable Terraform modules
+│   │   ├── networking/            # VPC, subnets, security groups
+│   │   ├── iam/                   # Roles and policies
+│   │   ├── dynamodb/              # Database tables
+│   │   ├── lambda/                # Function and ECR setup
+│   │   └── stepfunctions/         # State machines and EventBridge
+│   ├── environments/              # Environment-specific configurations
+│   │   ├── dev/                   # Development environment
+│   │   ├── staging/               # Staging environment
+│   │   └── prod/                  # Production environment
+│   └── scripts/                   # Deployment automation
+│       └── deploy.sh
+├── tests/                         # Unit tests
+├── Dockerfile                     # Container definition
+├── pyproject.toml                # Python project configuration
+└── README.md
 ```
 
-### Adding Dependencies
+## 🚀 Quick Start
 
-Add dependencies to `pyproject.toml`:
+### Prerequisites
 
-```toml
-dependencies = [
-    "new-package>=1.0.0",
-]
-```
+- [Terraform](https://terraform.io/) >= 1.0
+- [AWS CLI](https://aws.amazon.com/cli/) configured with appropriate credentials
+- [Docker](https://docker.com/) for building Lambda images
+- [UV](https://github.com/astral-sh/uv) for Python dependency management
 
-The Docker build will automatically install them using UV.
+### 1. Bootstrap Remote State Backend
 
-### Local Development
-
-1. **Install UV**:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-2. **Create Virtual Environment**:
-   ```bash
-   uv venv
-   source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-   ```
-
-3. **Install Dependencies**:
-   ```bash
-   uv pip install -e .
-   ```
-
-4. **Run Tests**:
-   ```bash
-   uv run pytest
-   uv run pytest tests/test_mcp_server.py  # MCP server tests
-   uv run pytest tests/test_cli.py         # CLI tests
-   ```
-
-5. **Development Commands**:
-   ```bash
-   # Start development MCP server
-   uv run python -m src.mcp_server
-   
-   # Run CLI commands
-   uv run hitl-mcp --help
-   uv run hitl-mcp serve --debug
-   
-   # Format and lint code
-   uv run ruff format .
-   uv run ruff check .
-   ```
-
-## Monitoring and Logging
-
-- **CloudWatch Logs**: Lambda execution logs
-- **DynamoDB**: Approval request history
-- **ECR**: Container image scanning and lifecycle policies
-- **Step Functions**: Workflow execution history
-
-## Cleanup
-
-To destroy all resources:
+First, deploy the shared infrastructure for Terraform remote state:
 
 ```bash
-./build_and_deploy.sh destroy
+# Deploy S3 bucket and DynamoDB table for remote state
+terraform/scripts/deploy.sh bootstrap apply
 ```
 
-## Contributing
+This creates:
+- S3 bucket for storing Terraform state files
+- DynamoDB table for state locking
+- Proper encryption and security configurations
 
-1. Follow the workspace rules defined in the project
-2. Write tests for new functions
-3. Add type hints and docstrings
-4. Update documentation for new features
-5. Use ruff for linting and formatting
+### 2. Deploy to Development Environment
 
-## License
+```bash
+# Plan development deployment
+terraform/scripts/deploy.sh dev plan
 
-MIT License - see LICENSE file for details. 
+# Apply development deployment
+terraform/scripts/deploy.sh dev apply
+```
+
+### 3. Deploy to Other Environments
+
+```bash
+# Staging environment
+terraform/scripts/deploy.sh staging plan
+terraform/scripts/deploy.sh staging apply
+
+# Production environment  
+terraform/scripts/deploy.sh prod plan
+terraform/scripts/deploy.sh prod apply
+```
+
+## 🔧 Configuration
+
+### Environment-Specific Settings
+
+Each environment has its own configuration in `terraform/environments/{env}/terraform.tfvars`:
+
+#### Development (dev)
+- VPC CIDR: `10.0.0.0/16`
+- Lambda: 256MB memory, 30s timeout
+- Basic security settings
+- Bedrock Guardrails: Disabled
+
+#### Staging (staging)
+- VPC CIDR: `10.1.0.0/16`
+- Lambda: 512MB memory, 60s timeout
+- Enhanced monitoring
+- Bedrock Guardrails: Enabled
+
+#### Production (prod)
+- VPC CIDR: `10.2.0.0/16`
+- Lambda: 1024MB memory, 120s timeout
+- High availability configuration
+- Bedrock Guardrails: Enabled
+- Extended Step Functions timeout (4 hours)
+
+### Custom Configuration
+
+To customize any environment, edit the corresponding `terraform.tfvars` file:
+
+```hcl
+# terraform/environments/dev/terraform.tfvars
+
+# AWS Configuration
+aws_region = "us-east-1"
+environment = "dev"
+
+# VPC Configuration
+use_existing_vpc = false  # Set to true to use existing VPC
+# vpc_id = "vpc-xxxxxxxxx"  # Uncomment if using existing VPC
+
+# Lambda Configuration
+lambda_timeout = 30
+lambda_memory_size = 256
+
+# Notification Configuration
+# slack_webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+# teams_webhook_url = "https://outlook.office.com/webhook/YOUR/TEAMS/WEBHOOK"
+
+# Bedrock Configuration
+# enable_bedrock_guardrails = true
+# bedrock_guardrail_id = "your-guardrail-id"
+```
+
+## 🛠️ Development
+
+### Local Setup
+
+```bash
+# Install dependencies
+uv sync
+
+# Run tests
+uv run pytest
+
+# Run linting
+uv run ruff check
+
+# Run formatting
+uv run ruff format
+```
+
+### Building and Testing Lambda Functions
+
+```bash
+# Build Docker image locally
+docker build -t agentcore-hitl-approval .
+
+# Test locally (if you have lambda runtime emulator)
+docker run -p 9000:8080 agentcore-hitl-approval
+```
+
+## 📊 Monitoring and Observability
+
+### CloudWatch Integration
+
+- **Lambda Logs**: `/aws/lambda/{environment}_hitl_approval`
+- **Step Functions Logs**: `/aws/stepfunctions/{environment}-hitl-workflow`
+- **Retention**: 14 days (configurable)
+
+### Key Metrics to Monitor
+
+- Lambda execution duration and errors
+- Step Functions execution success/failure rates
+- DynamoDB read/write capacity and throttling
+- SNS message delivery rates
+
+## 🔐 Security
+
+### IAM Best Practices
+
+- Least privilege access for all roles
+- Separate roles for Lambda, Step Functions, and application components
+- Environment-specific resource isolation
+- Encrypted data at rest and in transit
+
+### Network Security
+
+- Private subnets for Lambda functions
+- Security groups with minimal required access
+- VPC endpoints for AWS service communication
+- Optional: Use existing VPC for enhanced security controls
+
+## 🚧 Advanced Usage
+
+### Using Existing VPC
+
+To deploy into an existing VPC, configure the following in your `terraform.tfvars`:
+
+```hcl
+use_existing_vpc = true
+vpc_id = "vpc-xxxxxxxxx"
+private_subnet_ids = ["subnet-xxxxxxxxx", "subnet-yyyyyyyyy"]
+public_subnet_ids = ["subnet-aaaaaaaaa", "subnet-bbbbbbbbb"]
+lambda_security_group_id = "sg-xxxxxxxxx"
+app_security_group_id = "sg-yyyyyyyyy"
+alb_security_group_id = "sg-zzzzzzzzz"
+```
+
+### Multi-Region Deployment
+
+To deploy to multiple regions:
+
+1. Copy environment folder and update region configuration
+2. Update backend configuration with region-specific bucket
+3. Deploy bootstrap infrastructure in new region first
+
+### Custom Modules
+
+The modular structure allows easy customization:
+
+```hcl
+# Add custom module
+module "custom_component" {
+  source = "../../modules/custom"
+  
+  name_prefix = local.name_prefix
+  tags        = local.common_tags
+}
+```
+
+## 🔄 Deployment Workflow
+
+### Recommended Deployment Flow
+
+1. **Bootstrap** (one time): `terraform/scripts/deploy.sh bootstrap apply`
+2. **Development**: `terraform/scripts/deploy.sh dev apply`
+3. **Testing**: Run integration tests against dev environment
+4. **Staging**: `terraform/scripts/deploy.sh staging apply`
+5. **Production**: `terraform/scripts/deploy.sh prod apply`
+
+### Destroying Infrastructure
+
+```bash
+# Destroy specific environment
+terraform/scripts/deploy.sh dev destroy
+
+# Destroy bootstrap (WARNING: This makes all state files inaccessible)
+terraform/scripts/deploy.sh bootstrap destroy
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes and add tests
+4. Run linting and formatting: `uv run ruff check && uv run ruff format`
+5. Ensure tests pass: `uv run pytest`
+6. Submit a pull request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Troubleshooting
+
+### Common Issues
+
+#### 1. Backend Not Found
+```
+Error: Backend configuration not found
+```
+**Solution**: Deploy bootstrap infrastructure first: `terraform/scripts/deploy.sh bootstrap apply`
+
+#### 2. Docker Build Fails
+```
+Error: Failed to build Docker image
+```
+**Solution**: Ensure Docker is running and you have permissions to access ECR
+
+#### 3. Permission Denied
+```
+Error: Access denied to S3 bucket
+```
+**Solution**: Verify AWS credentials have necessary permissions for S3 and DynamoDB
+
+#### 4. State Lock
+```
+Error: Error acquiring the state lock
+```
+**Solution**: Check DynamoDB table for stuck locks or wait for concurrent operation to complete
+
+### Getting Help
+
+- Check CloudWatch logs for Lambda and Step Functions
+- Review Terraform plan output before applying
+- Use `terraform/scripts/deploy.sh {env} plan` to preview changes
+- Ensure all required variables are set in `terraform.tfvars`
+
+## 🎯 Roadmap
+
+- [ ] Multi-region support with cross-region replication
+- [ ] Enhanced monitoring with custom CloudWatch dashboards
+- [ ] Automated testing pipeline with GitHub Actions
+- [ ] Blue-green deployment support
+- [ ] Cost optimization recommendations
+- [ ] Enhanced security scanning and compliance checks 

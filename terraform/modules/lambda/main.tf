@@ -1,16 +1,28 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = ">= 3.0"
+    }
+  }
+}
+
 # ECR Repository for Lambda Docker images
 resource "aws_ecr_repository" "agentcore_hitl_approval" {
-  name                 = "agentcore-hitl-approval"
+  name                 = "${var.name_prefix}-hitl-approval"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
   }
 
-  tags = {
-    Name        = "agentcore-hitl-approval"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-hitl-approval"
+  })
 }
 
 # ECR Repository lifecycle policy
@@ -54,7 +66,7 @@ resource "docker_image" "agentcore_hitl_approval" {
   name = "${aws_ecr_repository.agentcore_hitl_approval.repository_url}:latest"
   
   build {
-    context    = "${path.module}/.."
+    context    = var.source_path
     dockerfile = "Dockerfile"
     platform   = "linux/amd64"
     
@@ -65,9 +77,9 @@ resource "docker_image" "agentcore_hitl_approval" {
   }
 
   triggers = {
-    dockerfile_sha = filesha256("${path.module}/../Dockerfile")
-    pyproject_sha  = filesha256("${path.module}/../pyproject.toml")
-    handler_sha    = filesha256("${path.module}/../src/approval_handler.py")
+    dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
+    pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
+    handler_sha    = filesha256("${var.source_path}/src/approval_handler.py")
     package_sha    = sha256("")
   }
 }
@@ -82,17 +94,17 @@ resource "docker_registry_image" "agentcore_hitl_approval" {
   ]
 
   triggers = {
-    dockerfile_sha = filesha256("${path.module}/../Dockerfile")
-    pyproject_sha  = filesha256("${path.module}/../pyproject.toml")
-    handler_sha    = filesha256("${path.module}/../src/approval_handler.py")
+    dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
+    pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
+    handler_sha    = filesha256("${var.source_path}/src/approval_handler.py")
     package_sha    = sha256("")
   }
 }
 
 # Lambda function using Docker image
 resource "aws_lambda_function" "agentcore_hitl_approval" {
-  function_name = "agentcore_hitl_approval"
-  role         = aws_iam_role.lambda_execution_role.arn
+  function_name = "${var.name_prefix}_hitl_approval"
+  role         = var.lambda_execution_role_arn
   timeout      = var.lambda_timeout
   memory_size  = var.lambda_memory_size
   
@@ -101,16 +113,16 @@ resource "aws_lambda_function" "agentcore_hitl_approval" {
 
   # Only configure VPC if private subnets are available
   dynamic "vpc_config" {
-    for_each = length(local.private_subnet_ids) > 0 ? [1] : []
+    for_each = length(var.private_subnet_ids) > 0 ? [1] : []
     content {
-      subnet_ids         = local.private_subnet_ids
-      security_group_ids = [local.lambda_security_group_id]
+      subnet_ids         = var.private_subnet_ids
+      security_group_ids = [var.lambda_security_group_id]
     }
   }
 
   environment {
     variables = {
-      TABLE_NAME         = aws_dynamodb_table.agentcore_approval_log.name
+      TABLE_NAME         = var.dynamodb_table_name
       SLACK_WEBHOOK_URL  = var.slack_webhook_url
       TEAMS_WEBHOOK_URL  = var.teams_webhook_url
       SNS_TOPIC_ARN      = aws_sns_topic.agentcore_notifications.arn
@@ -118,27 +130,23 @@ resource "aws_lambda_function" "agentcore_hitl_approval" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.lambda_basic_execution,
-    aws_iam_role_policy_attachment.lambda_dynamodb_policy_attachment,
     aws_cloudwatch_log_group.lambda_log_group,
     docker_registry_image.agentcore_hitl_approval,
   ]
 
-  tags = {
-    Name        = "agentcore-hitl-approval"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-hitl-approval"
+  })
 }
 
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_log_group" {
-  name              = "/aws/lambda/agentcore_hitl_approval"
+  name              = "/aws/lambda/${var.name_prefix}_hitl_approval"
   retention_in_days = 14
 
-  tags = {
-    Name        = "agentcore-lambda-logs"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-lambda-logs"
+  })
 }
 
 # Lambda function URL (optional - for direct HTTP access)
@@ -157,7 +165,7 @@ resource "aws_lambda_function_url" "agentcore_hitl_approval_url" {
 
 # SNS Topic for notifications
 resource "aws_sns_topic" "agentcore_notifications" {
-  name = "agentcore-notifications"
+  name = "${var.name_prefix}-notifications"
 }
 
 # SNS Topic tags (separate resource)
@@ -185,13 +193,4 @@ resource "aws_lambda_permission" "api_gateway_lambda" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.agentcore_hitl_approval.function_name
   principal     = "apigateway.amazonaws.com"
-}
-
-# Lambda permission for Step Functions
-resource "aws_lambda_permission" "step_functions_lambda" {
-  statement_id  = "AllowExecutionFromStepFunctions"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.agentcore_hitl_approval.function_name
-  principal     = "states.amazonaws.com"
-  source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
 } 
