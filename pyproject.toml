@@ -16,6 +16,8 @@ dependencies = [
     "polars>=0.20.0",
     "click>=8.1.0",
     "requests>=2.31.0",
+    "mcp>=1.0.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +42,9 @@ test = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project.scripts]
+hitl-mcp = "src.cli:cli"
 
 
 [tool.pytest.ini_options]

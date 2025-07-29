@@ -8,19 +8,24 @@ AWS Bedrock AgentCore-based human-in-the-loop system using Docker containers and
 - **UV Package Manager**: Fast Python package installation and dependency resolution  
 - **Terraform Infrastructure**: Complete AWS infrastructure as code
 - **Human-in-the-Loop Workflow**: Step Functions orchestrated approval process
+- **MCP Server Integration**: Native Model Context Protocol server with HITL approval middleware
+- **Risk-based Approval**: Intelligent risk evaluation with configurable approval thresholds
 - **Multiple Notification Channels**: Slack, Microsoft Teams, and SNS support
 - **DynamoDB Logging**: Persistent approval logs with TTL
 - **VPC Support**: Optional deployment in existing VPC infrastructure
+- **CLI Management**: Command-line tools for configuration and monitoring
 
 ## Architecture
 
 The system consists of:
 
-1. **Lambda Function** (Docker container): Processes approval requests and sends notifications
-2. **Step Functions**: Orchestrates the human-in-the-loop workflow
-3. **DynamoDB**: Stores approval logs and state machine data
-4. **ECR Repository**: Stores the Lambda Docker images
-5. **SNS/Slack/Teams**: Notification channels for approvals
+1. **MCP Server**: Human-in-the-Loop middleware that intercepts and evaluates MCP requests
+2. **Lambda Function** (Docker container): Processes approval requests and sends notifications
+3. **Step Functions**: Orchestrates the human-in-the-loop workflow
+4. **DynamoDB**: Stores approval logs and state machine data
+5. **ECR Repository**: Stores the Lambda Docker images
+6. **SNS/Slack/Teams**: Notification channels for approvals
+7. **Risk Evaluator**: Intelligent assessment of operation risk levels
 
 ## Prerequisites
 
@@ -46,6 +51,15 @@ The system consists of:
 3. **Deploy Infrastructure**:
    ```bash
    ./build_and_deploy.sh deploy
+   ```
+
+4. **Configure MCP Server**:
+   ```bash
+   # Generate MCP configuration
+   uv run hitl-mcp generate-config --lambda-url $LAMBDA_FUNCTION_URL --output mcp-config.json
+   
+   # Start HITL MCP server
+   uv run hitl-mcp serve --lambda-url $LAMBDA_FUNCTION_URL
    ```
 
 ## Deployment Options
@@ -131,6 +145,82 @@ The deployment uses Docker containers for Lambda functions:
 - AWS Lambda runtime compatibility
 - Automatic dependency resolution from pyproject.toml
 
+## MCP Server Usage
+
+### Starting the HITL MCP Server
+
+```bash
+# Using CLI with options
+uv run hitl-mcp serve \
+  --lambda-url https://your-lambda-url.aws.com \
+  --approver admin \
+  --timeout 3600 \
+  --auto-approve-low-risk
+
+# Using environment variables
+export LAMBDA_FUNCTION_URL=https://your-lambda-url.aws.com
+export DEFAULT_APPROVER=security_team
+uv run hitl-mcp serve
+
+# Using configuration file
+uv run hitl-mcp init-config --output hitl-config.json
+# Edit hitl-config.json with your settings
+uv run hitl-mcp serve --config-file hitl-config.json
+```
+
+### MCP Configuration
+
+Generate MCP client configuration:
+
+```bash
+uv run hitl-mcp generate-config \
+  --lambda-url https://your-lambda-url.aws.com \
+  --table-name your-dynamodb-table \
+  --sns-topic-arn arn:aws:sns:region:account:topic \
+  --output mcp-hitl-config.json
+```
+
+Add to your MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "hitl-approval": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "src.mcp_server"],
+      "cwd": "/path/to/agentcore_marketplace",
+      "env": {
+        "LAMBDA_FUNCTION_URL": "https://your-lambda-url.aws.com",
+        "DEFAULT_APPROVER": "admin",
+        "APPROVAL_TIMEOUT": "1800"
+      }
+    }
+  }
+}
+```
+
+### Risk Evaluation
+
+The system automatically evaluates risk levels for all MCP requests:
+
+- **LOW**: Read-only operations (tools/list, resources/list)
+- **MEDIUM**: Standard operations with moderate risk  
+- **HIGH**: File operations, network requests, shell commands
+- **CRITICAL**: System files, destructive commands, database operations
+
+### Managing Approvals
+
+```bash
+# Check approval status
+uv run hitl-mcp check-approval \
+  --lambda-url https://your-lambda-url.aws.com \
+  --request-id abc123
+
+# Monitor via MCP tools
+# Use approval_status tool in your MCP client
+# Use list_pending_approvals tool to see pending requests
+```
+
 ## API Usage
 
 ### Approval Request Format
@@ -157,6 +247,14 @@ The deployment uses Docker containers for Lambda functions:
   "notification_sent": true
 }
 ```
+
+### MCP Request Flow
+
+1. **Request Interception**: MCP server intercepts all tool calls
+2. **Risk Evaluation**: Automatic assessment of operation risk level
+3. **Approval Decision**: High/Critical risk operations require approval
+4. **Notification**: Approval requests sent via configured channels
+5. **Response**: Operation proceeds only after approval granted
 
 ## Development
 
@@ -206,6 +304,22 @@ The Docker build will automatically install them using UV.
 4. **Run Tests**:
    ```bash
    uv run pytest
+   uv run pytest tests/test_mcp_server.py  # MCP server tests
+   uv run pytest tests/test_cli.py         # CLI tests
+   ```
+
+5. **Development Commands**:
+   ```bash
+   # Start development MCP server
+   uv run python -m src.mcp_server
+   
+   # Run CLI commands
+   uv run hitl-mcp --help
+   uv run hitl-mcp serve --debug
+   
+   # Format and lint code
+   uv run ruff format .
+   uv run ruff check .
    ```
 
 ## Monitoring and Logging

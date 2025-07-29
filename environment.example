@@ -1,0 +1,39 @@
+# AgentCore HITL MCP Server Configuration
+# Copy this file to .env and fill in your actual values
+
+# AWS Lambda function URL for approval processing (required)
+LAMBDA_FUNCTION_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
+
+# Default approver for requests (default: admin)
+DEFAULT_APPROVER=admin
+
+# Timeout for approval requests in seconds (default: 1800)
+APPROVAL_TIMEOUT=1800
+
+# Auto-approve low risk operations (default: true)
+AUTO_APPROVE_LOW_RISK=true
+
+# DynamoDB table name for approval logs
+TABLE_NAME=agentcore-approval-logs
+
+# SNS topic ARN for notifications
+SNS_TOPIC_ARN=arn:aws:sns:us-east-1:123456789012:agentcore-approvals
+
+# AWS region
+AWS_REGION=us-east-1
+
+# Slack webhook URL (optional)
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+
+# Microsoft Teams webhook URL (optional)
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/YOUR/TEAMS/WEBHOOK
+
+# VPC configuration (if using existing VPC)
+USE_EXISTING_VPC=false
+VPC_ID=vpc-xxxxxxxxx
+PRIVATE_SUBNET_IDS=subnet-xxxxxxxx,subnet-yyyyyyyy
+LAMBDA_SECURITY_GROUP_ID=sg-xxxxxxxxx
+
+# Lambda configuration
+LAMBDA_TIMEOUT=30
+LAMBDA_MEMORY_SIZE=256 
