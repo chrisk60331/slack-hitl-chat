@@ -47,7 +47,7 @@ output "lambda_function_arn" {
 }
 
 output "lambda_function_url" {
-  description = "Function URL for the Lambda function"
+  description = "URL of the Lambda function for direct HTTP access"
   value       = aws_lambda_function_url.agentcore_hitl_approval_url.function_url
 }
 

@@ -111,6 +111,13 @@ resource "aws_iam_policy" "lambda_notification_policy" {
           "ses:SendRawEmail"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:GetFunctionUrlConfig"
+        ]
+        Resource = aws_lambda_function.agentcore_hitl_approval.arn
       }
     ]
   })
