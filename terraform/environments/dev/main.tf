@@ -86,21 +86,55 @@ module "iam" {
   tags                      = local.common_tags
 }
 
-# Lambda Module
-module "lambda" {
+# Approval Lambda Module
+module "approval_lambda" {
   source = "../../modules/lambda"
   
   name_prefix               = local.name_prefix
+  function_name            = "approval"
   source_path              = "${path.module}/../../../"
+  docker_target            = "approval"
+  handler_file             = "src/approval_handler.py"
   lambda_execution_role_arn = module.iam.lambda_execution_role_arn
   lambda_timeout           = var.lambda_timeout
   lambda_memory_size       = var.lambda_memory_size
   private_subnet_ids       = module.networking.private_subnet_ids
   lambda_security_group_id = module.networking.lambda_security_group_id
-  dynamodb_table_name      = module.dynamodb.approval_log_table_name
-  slack_webhook_url        = var.slack_webhook_url
-  teams_webhook_url        = var.teams_webhook_url
+  create_function_url      = true
+  create_sns_topic         = true
   tags                     = local.common_tags
+  
+  environment_variables = {
+    TABLE_NAME         = module.dynamodb.approval_log_table_name
+    SLACK_WEBHOOK_URL  = var.slack_webhook_url
+    TEAMS_WEBHOOK_URL  = var.teams_webhook_url
+  }
+}
+
+# Execute Lambda Module
+module "execute_lambda" {
+  source = "../../modules/lambda"
+  
+  name_prefix                       = local.name_prefix
+  function_name                    = "execute"
+  source_path                      = "${path.module}/../../../"
+  docker_target                    = "execute"
+  handler_file                     = "src/execute_handler.py"
+  lambda_execution_role_arn        = module.iam.execute_lambda_execution_role_arn
+  lambda_timeout                   = var.execute_lambda_timeout
+  lambda_memory_size               = var.execute_lambda_memory_size
+  private_subnet_ids               = module.networking.private_subnet_ids
+  lambda_security_group_id         = module.networking.lambda_security_group_id
+  create_function_url              = false
+  create_sns_topic                 = false
+  step_functions_state_machine_arn = module.stepfunctions.step_functions_arn
+  tags                             = local.common_tags
+  
+  environment_variables = {
+    TABLE_NAME          = module.dynamodb.approval_log_table_name
+    GOOGLE_TOKEN_JSON   = var.google_token_json
+    LOG_LEVEL          = "INFO"
+  }
 }
 
 # Step Functions Module
@@ -109,9 +143,10 @@ module "stepfunctions" {
   
   name_prefix                        = local.name_prefix
   step_functions_execution_role_arn  = module.iam.step_functions_execution_role_arn
-  lambda_function_arn               = module.lambda.lambda_function_arn
-  lambda_function_name              = module.lambda.lambda_function_name
+  lambda_function_arn               = module.approval_lambda.lambda_function_arn
+  lambda_function_name              = module.approval_lambda.lambda_function_name
   eventbridge_role_arn              = module.iam.eventbridge_role_arn
   stepfunctions_timeout             = var.stepfunctions_timeout
   tags                              = local.common_tags
+  execute_lambda_function_arn       = module.execute_lambda.lambda_function_arn
 } 

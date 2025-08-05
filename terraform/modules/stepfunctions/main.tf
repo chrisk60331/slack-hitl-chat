@@ -75,6 +75,49 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
           status  = "approved"
           message = "Request has been approved"
         }
+        Next = "ExecuteApprovedAction"
+      }
+      ExecuteApprovedAction = {
+        Type     = "Task"
+        Resource = var.execute_lambda_function_arn
+        Parameters = {
+          "request_id.$" = "$.body.request_id"
+          "execution_timeout" = 300
+        }
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+        Catch = [
+          {
+            ErrorEquals = ["States.TaskFailed"]
+            Next        = "ExecutionFailed"
+          },
+          {
+            ErrorEquals = ["States.ALL"]
+            Next        = "ExecutionFailed"
+          }
+        ]
+        Next = "ExecutionComplete"
+      }
+      ExecutionComplete = {
+        Type   = "Pass"
+        Result = {
+          status  = "completed"
+          message = "Request approved and executed successfully"
+        }
+        End = true
+      }
+      ExecutionFailed = {
+        Type   = "Pass"
+        Result = {
+          status  = "execution_failed"
+          message = "Request was approved but execution failed"
+        }
         End = true
       }
       ApprovalRejected = {
@@ -133,11 +176,20 @@ resource "aws_cloudwatch_event_target" "step_functions_target" {
   role_arn  = var.eventbridge_role_arn
 }
 
-# Lambda permission for Step Functions
+# Lambda permission for Step Functions (approval lambda)
 resource "aws_lambda_permission" "step_functions_lambda" {
   statement_id  = "AllowExecutionFromStepFunctions"
   action        = "lambda:InvokeFunction"
   function_name = var.lambda_function_name
+  principal     = "states.amazonaws.com"
+  source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
+}
+
+# Lambda permission for Step Functions (execute lambda)
+resource "aws_lambda_permission" "step_functions_execute_lambda" {
+  statement_id  = "AllowExecutionFromStepFunctionsExecute"
+  action        = "lambda:InvokeFunction"
+  function_name = var.execute_lambda_function_arn
   principal     = "states.amazonaws.com"
   source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
 } 

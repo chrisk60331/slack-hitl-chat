@@ -12,8 +12,8 @@ terraform {
 }
 
 # ECR Repository for Lambda Docker images
-resource "aws_ecr_repository" "agentcore_hitl_approval" {
-  name                 = "${var.name_prefix}-hitl-approval"
+resource "aws_ecr_repository" "lambda" {
+  name                 = "${var.name_prefix}-${var.function_name}"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -21,13 +21,13 @@ resource "aws_ecr_repository" "agentcore_hitl_approval" {
   }
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-hitl-approval"
+    Name = "${var.name_prefix}-${var.function_name}"
   })
 }
 
 # ECR Repository lifecycle policy
-resource "aws_ecr_lifecycle_policy" "agentcore_hitl_approval_policy" {
-  repository = aws_ecr_repository.agentcore_hitl_approval.name
+resource "aws_ecr_lifecycle_policy" "lambda_policy" {
+  repository = aws_ecr_repository.lambda.name
 
   policy = jsonencode({
     rules = [
@@ -62,13 +62,14 @@ resource "aws_ecr_lifecycle_policy" "agentcore_hitl_approval_policy" {
 }
 
 # Build and push Docker image
-resource "docker_image" "agentcore_hitl_approval" {
-  name = "${aws_ecr_repository.agentcore_hitl_approval.repository_url}:latest"
+resource "docker_image" "lambda" {
+  name = "${aws_ecr_repository.lambda.repository_url}:latest"
   
   build {
     context    = var.source_path
     dockerfile = "Dockerfile"
     platform   = "linux/amd64"
+    target     = var.docker_target
     
     # Force rebuild when source files change
     build_args = {
@@ -79,37 +80,37 @@ resource "docker_image" "agentcore_hitl_approval" {
   triggers = {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
-    handler_sha    = filesha256("${var.source_path}/src/approval_handler.py")
+    handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
     package_sha    = sha256("")
   }
 }
 
 # Push image to ECR
-resource "docker_registry_image" "agentcore_hitl_approval" {
-  name = docker_image.agentcore_hitl_approval.name
+resource "docker_registry_image" "lambda" {
+  name = docker_image.lambda.name
 
   depends_on = [
-    aws_ecr_repository.agentcore_hitl_approval,
-    docker_image.agentcore_hitl_approval
+    aws_ecr_repository.lambda,
+    docker_image.lambda
   ]
 
   triggers = {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
-    handler_sha    = filesha256("${var.source_path}/src/approval_handler.py")
+    handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
     package_sha    = sha256("")
   }
 }
 
 # Lambda function using Docker image
-resource "aws_lambda_function" "agentcore_hitl_approval" {
-  function_name = "${var.name_prefix}_hitl_approval"
+resource "aws_lambda_function" "lambda" {
+  function_name = "${var.name_prefix}_${var.function_name}"
   role         = var.lambda_execution_role_arn
   timeout      = var.lambda_timeout
   memory_size  = var.lambda_memory_size
   
   package_type = "Image"
-  image_uri    = "${aws_ecr_repository.agentcore_hitl_approval.repository_url}@${docker_registry_image.agentcore_hitl_approval.sha256_digest}"
+  image_uri    = "${aws_ecr_repository.lambda.repository_url}@${docker_registry_image.lambda.sha256_digest}"
 
   # Only configure VPC if private subnets are available
   dynamic "vpc_config" {
@@ -121,37 +122,38 @@ resource "aws_lambda_function" "agentcore_hitl_approval" {
   }
 
   environment {
-    variables = {
-      TABLE_NAME         = var.dynamodb_table_name
-      SLACK_WEBHOOK_URL  = var.slack_webhook_url
-      TEAMS_WEBHOOK_URL  = var.teams_webhook_url
-      SNS_TOPIC_ARN      = aws_sns_topic.agentcore_notifications.arn
-    }
+    variables = merge(
+      var.environment_variables,
+      var.create_sns_topic ? {
+        SNS_TOPIC_ARN = aws_sns_topic.notifications[0].arn
+      } : {}
+    )
   }
 
   depends_on = [
     aws_cloudwatch_log_group.lambda_log_group,
-    docker_registry_image.agentcore_hitl_approval,
+    docker_registry_image.lambda,
   ]
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-hitl-approval"
+    Name = "${var.name_prefix}-${var.function_name}"
   })
 }
 
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_log_group" {
-  name              = "/aws/lambda/${var.name_prefix}_hitl_approval"
+  name              = "/aws/lambda/${var.name_prefix}_${var.function_name}"
   retention_in_days = 14
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-lambda-logs"
+    Name = "${var.name_prefix}-${var.function_name}-logs"
   })
 }
 
 # Lambda function URL (optional - for direct HTTP access)
-resource "aws_lambda_function_url" "agentcore_hitl_approval_url" {
-  function_name      = aws_lambda_function.agentcore_hitl_approval.function_name
+resource "aws_lambda_function_url" "lambda_url" {
+  count              = var.create_function_url ? 1 : 0
+  function_name      = aws_lambda_function.lambda.function_name
   authorization_type = "NONE"
 
   cors {
@@ -163,14 +165,21 @@ resource "aws_lambda_function_url" "agentcore_hitl_approval_url" {
   }
 }
 
-# SNS Topic for notifications
-resource "aws_sns_topic" "agentcore_notifications" {
-  name = "${var.name_prefix}-notifications"
+# SNS Topic for notifications (optional)
+resource "aws_sns_topic" "notifications" {
+  count = var.create_sns_topic ? 1 : 0
+  name  = "${var.name_prefix}-${var.function_name}-notifications"
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-${var.function_name}-notifications"
+  })
 }
 
-# SNS Topic tags (separate resource)
-resource "aws_sns_topic_policy" "agentcore_notifications_policy" {
-  arn = aws_sns_topic.agentcore_notifications.arn
+# SNS Topic policy (optional)
+resource "aws_sns_topic_policy" "notifications_policy" {
+  count = var.create_sns_topic ? 1 : 0
+  arn   = aws_sns_topic.notifications[0].arn
+  
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -180,17 +189,18 @@ resource "aws_sns_topic_policy" "agentcore_notifications_policy" {
           Service = "lambda.amazonaws.com"
         }
         Action = "sns:Publish"
-        Resource = aws_sns_topic.agentcore_notifications.arn
+        Resource = aws_sns_topic.notifications[0].arn
       }
     ]
   })
 }
 
-# Lambda permission for API Gateway (if using API Gateway)
-resource "aws_lambda_permission" "api_gateway_lambda" {
-  count         = 0  # Set to 1 if using API Gateway
-  statement_id  = "AllowExecutionFromAPIGateway"
+# Lambda permission for Step Functions (optional)
+resource "aws_lambda_permission" "step_functions_lambda" {
+  count         = var.step_functions_state_machine_arn != "" ? 1 : 0
+  statement_id  = "AllowExecutionFromStepFunctions"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.agentcore_hitl_approval.function_name
-  principal     = "apigateway.amazonaws.com"
+  function_name = aws_lambda_function.lambda.function_name
+  principal     = "states.amazonaws.com"
+  source_arn    = var.step_functions_state_machine_arn
 } 

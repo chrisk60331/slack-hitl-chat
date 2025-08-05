@@ -3,8 +3,23 @@ variable "name_prefix" {
   type        = string
 }
 
+variable "function_name" {
+  description = "Name suffix for the Lambda function (e.g., 'approval', 'execute')"
+  type        = string
+}
+
 variable "source_path" {
   description = "Path to the source code directory"
+  type        = string
+}
+
+variable "docker_target" {
+  description = "Docker build target (e.g., 'approval', 'execute')"
+  type        = string
+}
+
+variable "handler_file" {
+  description = "Handler file path for trigger detection (e.g., 'src/approval_handler.py')"
   type        = string
 }
 
@@ -37,23 +52,28 @@ variable "lambda_security_group_id" {
   default     = ""
 }
 
-variable "dynamodb_table_name" {
-  description = "Name of the DynamoDB table for approval logs"
-  type        = string
+variable "environment_variables" {
+  description = "Environment variables for the Lambda function"
+  type        = map(string)
+  default     = {}
 }
 
-variable "slack_webhook_url" {
-  description = "Slack webhook URL for notifications"
-  type        = string
-  default     = ""
-  sensitive   = true
+variable "create_function_url" {
+  description = "Whether to create a Lambda function URL"
+  type        = bool
+  default     = false
 }
 
-variable "teams_webhook_url" {
-  description = "Microsoft Teams webhook URL for notifications"
+variable "create_sns_topic" {
+  description = "Whether to create an SNS topic for notifications"
+  type        = bool
+  default     = false
+}
+
+variable "step_functions_state_machine_arn" {
+  description = "ARN of the Step Functions state machine (for permissions)"
   type        = string
   default     = ""
-  sensitive   = true
 }
 
 variable "tags" {

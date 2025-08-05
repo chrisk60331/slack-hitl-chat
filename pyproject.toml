@@ -18,6 +18,18 @@ dependencies = [
     "requests>=2.31.0",
     "mcp>=1.0.0",
     "httpx>=0.25.0",
+    # Google MCP dependencies
+    "fastmcp>=2.8.1",
+    "fastapi>=0.109.2",
+    "uvicorn>=0.27.1",
+    "google-api-python-client>=2.164.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.1",
+    "pydantic-settings>=2.9.1",
+    "email-validator>=2.1.0.post1",
+    "python-dotenv>=1.0.1",
+    "watchfiles>=1.0.5",
+    "fastapi-azure-auth>=5.1.1",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +54,9 @@ test = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 
 [project.scripts]
 hitl-mcp = "src.cli:cli"

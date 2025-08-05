@@ -126,3 +126,22 @@ variable "alb_security_group_id" {
   type        = string
   default     = ""
 } 
+
+variable "google_token_json" {
+  description = "Google token JSON for Google MCP"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "execute_lambda_timeout" {
+  description = "Execute Lambda function timeout in seconds"
+  type        = number
+  default     = 300
+}
+
+variable "execute_lambda_memory_size" {
+  description = "Execute Lambda function memory size in MB"
+  type        = number
+  default     = 512
+}

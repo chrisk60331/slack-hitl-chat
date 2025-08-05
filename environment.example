@@ -36,4 +36,19 @@ LAMBDA_SECURITY_GROUP_ID=sg-xxxxxxxxx
 
 # Lambda configuration
 LAMBDA_TIMEOUT=30
-LAMBDA_MEMORY_SIZE=256 
+LAMBDA_MEMORY_SIZE=256
+
+# Google Workspace Admin API Configuration
+# Service account configuration for Google MCP
+GOOGLE__ADMIN_EMAIL=admin@yourdomain.com
+GOOGLE__TYPE=service_account
+GOOGLE__PROJECT_ID=your-google-cloud-project-id
+GOOGLE__PRIVATE_KEY_ID=your-private-key-id
+GOOGLE__PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_CONTENT\n-----END PRIVATE KEY-----"
+GOOGLE__CLIENT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE__CLIENT_ID=your-client-id
+GOOGLE__AUTH_URI=https://accounts.google.com/o/oauth2/auth
+GOOGLE__TOKEN_URI=https://oauth2.googleapis.com/token
+GOOGLE__AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+GOOGLE__CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com
+GOOGLE__UNIVERSE_DOMAIN=googleapis.com 

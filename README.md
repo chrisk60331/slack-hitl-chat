@@ -23,8 +23,14 @@ agentcore_marketplace/
 ├── src/                           # Application source code
 │   ├── __init__.py
 │   ├── approval_handler.py        # Lambda function handler
-│   ├── cli.py                     # CLI interface
-│   └── mcp_server.py             # MCP server implementation
+│   ├── execute_handler.py         # MCP execution handler
+│   ├── google_admin/              # Google Workspace MCP integration
+│   │   ├── config/                # Google API configuration
+│   │   ├── models/                # Request/response models
+│   │   ├── services/              # Business logic
+│   │   ├── repositories/          # Google API client
+│   │   ├── utils/                 # Helper utilities
+│   │   └── mcp_server.py          # FastMCP server implementation
 ├── terraform/                     # Infrastructure as Code
 │   ├── bootstrap/                 # Remote state backend setup
 │   │   ├── main.tf
@@ -312,6 +318,76 @@ Error: Error acquiring the state lock
 - Use `terraform/scripts/deploy.sh {env} plan` to preview changes
 - Ensure all required variables are set in `terraform.tfvars`
 
+## 🔧 Execute Step with Google MCP Integration
+
+The execute step is a Lambda function that loads an MCP (Model Context Protocol) server and executes approved actions. This enables the system to actually perform the operations that were approved through the human-in-the-loop workflow.
+
+### Components
+
+1. **Execute Lambda Function** (`src/execute_handler.py`)
+   - Loads Google MCP server with Google Workspace Admin tools
+   - Executes approved actions (add user, suspend user, etc.)
+   - Reports execution results back to the workflow
+
+2. **Google MCP Integration**
+   - Integrates with Google Workspace Admin Directory API
+   - Provides tools for user management operations
+   - Requires Google OAuth2 credentials
+
+3. **Enhanced Step Functions Workflow**
+   - Added execute step after approval is granted
+   - Handles execution success/failure states
+   - Provides full end-to-end automation
+
+### Deployment
+
+Deploy the execute step with Google MCP integration:
+
+```bash
+# Set your Google OAuth2 token (base64 encoded)
+export GOOGLE_TOKEN_JSON="your_base64_encoded_google_oauth2_token"
+
+# Run the deployment script
+./deploy_execute_lambda.sh
+```
+
+### Configuration
+
+The execute lambda requires:
+
+1. **Google OAuth2 Token**: Base64 encoded JSON file with OAuth2 credentials
+2. **DynamoDB Access**: To read approval requests and update execution status
+3. **VPC Configuration**: Optional, for secure network access
+
+### Available Tools
+
+The Google MCP server provides the following tools:
+
+- **list_users**: List users in a Google Workspace domain
+- **add_user**: Create new users with secure random passwords
+- **get_user**: Get detailed user information
+- **suspend_user**: Suspend user accounts
+- **unsuspend_user**: Unsuspend user accounts
+
+### Testing
+
+```bash
+# Run unit tests for the execute handler
+uv run pytest tests/test_execute_handler.py -v
+
+# Test the complete workflow
+aws stepfunctions start-execution \
+  --state-machine-arn $(terraform output -raw step_functions_arn) \
+  --input '{"request_id":"test-request","tool_name":"add_user","parameters":{"primary_email":"test@example.com","first_name":"Test","last_name":"User"}}'
+```
+
+### Security Considerations
+
+- Google OAuth2 credentials are stored securely as environment variables
+- All user creation requires password change on first login
+- Execution results are logged in CloudWatch for auditing
+- VPC configuration provides network isolation
+
 ## 🎯 Roadmap
 
 - [ ] Multi-region support with cross-region replication
@@ -319,4 +395,7 @@ Error: Error acquiring the state lock
 - [ ] Automated testing pipeline with GitHub Actions
 - [ ] Blue-green deployment support
 - [ ] Cost optimization recommendations
-- [ ] Enhanced security scanning and compliance checks 
+- [ ] Enhanced security scanning and compliance checks
+- [x] Execute step with MCP server integration
+- [ ] Support for additional MCP servers and tools
+- [ ] Enhanced error handling and retry mechanisms 

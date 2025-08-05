@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Local DynamoDB for testing
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: agentcore-dynamodb-local
+    ports:
+      - "8000:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    networks:
+      - agentcore-local
+
+  # Execute Lambda for testing
+  execute-lambda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: execute
+    container_name: agentcore-execute-local
+    environment:
+      # AWS credentials (use local DynamoDB)
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
+      
+      # Application environment
+      - TABLE_NAME=agentcore-approvals-local
+      - LOG_LEVEL=DEBUG
+      - PYTHONPATH=/var/task:/var/task/src
+      
+      # Google Workspace Admin API Configuration
+      - GOOGLE__ADMIN_EMAIL=${GOOGLE__ADMIN_EMAIL:-admin@example.com}
+      - GOOGLE__TYPE=${GOOGLE__TYPE:-service_account}
+      - GOOGLE__PROJECT_ID=${GOOGLE__PROJECT_ID:-your-project-id}
+      - GOOGLE__PRIVATE_KEY_ID=${GOOGLE__PRIVATE_KEY_ID:-your-key-id}
+      - GOOGLE__PRIVATE_KEY=${GOOGLE__PRIVATE_KEY:-placeholder-key}
+      - GOOGLE__CLIENT_EMAIL=${GOOGLE__CLIENT_EMAIL:-service-account@project.iam.gserviceaccount.com}
+      - GOOGLE__CLIENT_ID=${GOOGLE__CLIENT_ID:-your-client-id}
+      - GOOGLE__AUTH_URI=${GOOGLE__AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      - GOOGLE__TOKEN_URI=${GOOGLE__TOKEN_URI:-https://oauth2.googleapis.com/token}
+      - GOOGLE__AUTH_PROVIDER_X509_CERT_URL=${GOOGLE__AUTH_PROVIDER_X509_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+      - GOOGLE__CLIENT_X509_CERT_URL=${GOOGLE__CLIENT_X509_CERT_URL:-https://www.googleapis.com/robot/v1/metadata/x509/service-account%40project.iam.gserviceaccount.com}
+      - GOOGLE__UNIVERSE_DOMAIN=${GOOGLE__UNIVERSE_DOMAIN:-googleapis.com}
+      
+      # Azure configuration (required by settings validation)
+      - AZURE__TENANT_ID=${AZURE__TENANT_ID:-dummy-tenant-id}
+      - AZURE__APP_CLIENT_ID=${AZURE__APP_CLIENT_ID:-dummy-app-client-id}
+      - AZURE__OPENAPI_CLIENT_ID=${AZURE__OPENAPI_CLIENT_ID:-dummy-openapi-client-id}
+      
+      # Lambda runtime simulation
+      - LAMBDA_TASK_ROOT=/var/task
+      - _HANDLER=src.execute_handler.lambda_handler
+    ports:
+      - "9000:8080"  # Lambda Runtime Interface Emulator port
+    volumes:
+      # Mount source for development
+      - ./src:/var/task/src:ro
+      - ./tests:/var/task/tests:ro
+    depends_on:
+      - dynamodb-local
+    networks:
+      - agentcore-local
+    # Use the default Lambda entrypoint with handler as argument
+    command: ["src.execute_handler.lambda_handler"]
+
+  # Test runner container (separate from lambda runtime)
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: execute
+    container_name: agentcore-test-runner
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
+      - TABLE_NAME=agentcore-approvals-local
+      - GOOGLE_TOKEN_JSON=${GOOGLE_TOKEN_JSON:-placeholder_token}
+      - LOG_LEVEL=DEBUG
+      - PYTHONPATH=/var/task:/opt/google_mcp
+    volumes:
+      - ./src:/var/task/src:ro
+      - ./tests:/var/task/tests:ro
+      - ./scripts:/var/task/scripts:ro
+    depends_on:
+      - dynamodb-local
+      - execute-lambda
+    networks:
+      - agentcore-local
+    # Override entrypoint to use regular Python instead of Lambda runtime
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "while true; do sleep 30; done"]
+
+  # Alternative: Direct Python test runner (no Lambda runtime)
+  python-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: execute
+    container_name: agentcore-python-tester
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
+      - TABLE_NAME=agentcore-approvals-local
+      - GOOGLE_TOKEN_JSON=${GOOGLE_TOKEN_JSON:-placeholder_token}
+      - LOG_LEVEL=DEBUG
+      - PYTHONPATH=/var/task:/opt/google_mcp
+      # Google MCP configuration requirements
+      - AZURE_TENANT_ID=test-tenant
+      - AZURE_CLIENT_ID=test-client
+      - AZURE_CLIENT_SECRET=test-secret
+      - GOOGLE_CLIENT_ID=test-google-client
+      - GOOGLE_CLIENT_SECRET=test-google-secret
+      - GOOGLE_REFRESH_TOKEN=test-refresh-token
+    volumes:
+      - ./src:/var/task/src:ro
+      - ./tests:/var/task/tests:ro
+      - ./scripts:/var/task/scripts:ro
+    depends_on:
+      - dynamodb-local
+    networks:
+      - agentcore-local
+    # Keep container running for testing
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "echo 'Python tester ready...' && while true; do sleep 30; done"]
+    working_dir: /var/task
+
+networks:
+  agentcore-local:
+    driver: bridge

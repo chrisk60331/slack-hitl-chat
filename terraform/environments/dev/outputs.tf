@@ -36,19 +36,29 @@ output "dynamodb_state_table_name" {
 }
 
 # Lambda Outputs
-output "lambda_function_name" {
+output "approval_lambda_function_name" {
   description = "Name of the AgentCore HITL approval Lambda function"
-  value       = module.lambda.lambda_function_name
+  value       = module.approval_lambda.lambda_function_name
 }
 
-output "lambda_function_arn" {
+output "approval_lambda_function_arn" {
   description = "ARN of the AgentCore HITL approval Lambda function"
-  value       = module.lambda.lambda_function_arn
+  value       = module.approval_lambda.lambda_function_arn
 }
 
-output "lambda_function_url" {
-  description = "URL of the Lambda function for direct HTTP access"
-  value       = module.lambda.lambda_function_url
+output "approval_lambda_function_url" {
+  description = "URL of the approval Lambda function for direct HTTP access"
+  value       = module.approval_lambda.lambda_function_url
+}
+
+output "execute_lambda_function_name" {
+  description = "Name of the AgentCore execute Lambda function"
+  value       = module.execute_lambda.lambda_function_name
+}
+
+output "execute_lambda_function_arn" {
+  description = "ARN of the AgentCore execute Lambda function"
+  value       = module.execute_lambda.lambda_function_arn
 }
 
 # Step Functions Outputs
@@ -102,7 +112,7 @@ output "alb_security_group_id" {
 # SNS Outputs
 output "sns_topic_arn" {
   description = "ARN of the AgentCore notifications SNS topic"
-  value       = module.lambda.sns_topic_arn
+  value       = module.approval_lambda.sns_topic_arn
 }
 
 # EventBridge Outputs
@@ -112,9 +122,14 @@ output "eventbridge_rule_name" {
 }
 
 # CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = module.lambda.lambda_log_group_name
+output "approval_lambda_log_group_name" {
+  description = "Name of the approval Lambda CloudWatch log group"
+  value       = module.approval_lambda.lambda_log_group_name
+}
+
+output "execute_lambda_log_group_name" {
+  description = "Name of the execute Lambda CloudWatch log group"
+  value       = module.execute_lambda.lambda_log_group_name
 }
 
 output "step_functions_log_group_name" {
@@ -129,7 +144,7 @@ output "environment_variables" {
     TABLE_NAME         = module.dynamodb.approval_log_table_name
     AWS_REGION         = var.aws_region
     STEPFUNCTIONS_ARN  = module.stepfunctions.step_functions_arn
-    SNS_TOPIC_ARN      = module.lambda.sns_topic_arn
+    SNS_TOPIC_ARN      = module.approval_lambda.sns_topic_arn
   }
 }
 
@@ -140,7 +155,7 @@ output "deployment_info" {
     region                = var.aws_region
     environment          = var.environment
     vpc_id               = module.networking.vpc_id
-    lambda_function_url  = module.lambda.lambda_function_url
+    approval_lambda_url  = module.approval_lambda.lambda_function_url
     step_functions_arn   = module.stepfunctions.step_functions_arn
     dynamodb_table       = module.dynamodb.approval_log_table_name
   }

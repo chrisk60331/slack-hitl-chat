@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import pytest
-from moto import mock_dynamodb
+from moto import mock_aws
 import boto3
 
 from src.approval_handler import (
@@ -273,7 +273,7 @@ class TestApprovalDecisionHandling:
 class TestHandleApprovalDecision:
     """Test cases for the _handle_approval_decision function."""
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     @patch('src.approval_handler.send_notifications')
     def test_handle_approval_decision_success(self, mock_send_notifications: Mock) -> None:
@@ -318,7 +318,7 @@ class TestHandleApprovalDecision:
         assert result['body']['request_id'] == 'test-123'
         assert result['body']['status'] == 'approve'
         assert result['body']['approver'] == 'admin_user'
-        assert 'approved successfully' in result['body']['message']
+        assert 'approve successfully' in result['body']['message']
         
         # Verify DynamoDB was updated
         response = table.get_item(Key={'request_id': 'test-123'})
@@ -330,7 +330,7 @@ class TestHandleApprovalDecision:
         # Verify notification was sent
         mock_send_notifications.assert_called_once()
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     def test_handle_approval_decision_not_found(self) -> None:
         """Test approval decision with non-existent request ID."""
@@ -358,7 +358,7 @@ class TestHandleApprovalDecision:
 class TestLambdaHandler:
     """Test cases for the main lambda_handler function."""
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     @patch('src.approval_handler.send_notifications')
     def test_lambda_handler_approval_decision(self, mock_send_notifications: Mock) -> None:
@@ -403,7 +403,7 @@ class TestLambdaHandler:
         assert result['body']['status'] == 'reject'
         assert result['body']['approver'] == 'admin_user'
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     @patch('src.approval_handler.send_notifications')
     def test_lambda_handler_new_request(self, mock_send_notifications: Mock) -> None:
@@ -451,7 +451,7 @@ class TestLambdaHandler:
 class TestGetApprovalStatus:
     """Test cases for the get_approval_status function."""
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     def test_get_approval_status_found(self) -> None:
         """Test retrieving existing approval status."""
@@ -482,7 +482,7 @@ class TestGetApprovalStatus:
         assert result.requester == 'test_user'
         assert result.approval_status == 'approved'
 
-    @mock_dynamodb
+    @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')
     def test_get_approval_status_not_found(self) -> None:
         """Test retrieving non-existent approval status."""

@@ -42,3 +42,13 @@ output "eventbridge_role_name" {
   description = "Name of the EventBridge role"
   value       = aws_iam_role.eventbridge_role.name
 } 
+
+output "execute_lambda_execution_role_arn" {
+  description = "ARN of the Execute Lambda execution role"
+  value       = aws_iam_role.lambda_execution_role.arn
+}
+
+output "execute_lambda_execution_role_name" {
+  description = "Name of the Execute Lambda execution role"
+  value       = aws_iam_role.lambda_execution_role.name
+}

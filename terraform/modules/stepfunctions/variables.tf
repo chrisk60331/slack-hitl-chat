@@ -29,6 +29,11 @@ variable "stepfunctions_timeout" {
   default     = 3600
 }
 
+variable "execute_lambda_function_arn" {
+  description = "ARN of the Execute Lambda function to invoke"
+  type        = string
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

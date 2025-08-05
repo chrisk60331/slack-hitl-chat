@@ -98,11 +98,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Response dictionary with status and data
     """
     try:
-        print(f"Event: {event}")
-        
-        # Determine request type based on event structure
-        http_method = event.get('httpMethod') or event.get('requestContext', {}).get('http', {}).get('method', 'POST')
-        
         # Handle approval decision (POST with approval data)
         if _is_approval_decision(event):
             return _handle_approval_decision(event)
@@ -186,7 +181,7 @@ def _handle_approval_decision(event: Dict[str, Any]) -> Dict[str, Any]:
         'status': approval_item.approval_status,
         'approver': approval_item.approver,
         'timestamp': approval_item.timestamp,
-        'message': f"Request {decision.action}d successfully"
+        'message': f"Request {decision.action} successfully"
     }
     
     return {
