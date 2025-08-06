@@ -133,6 +133,10 @@ module "execute_lambda" {
   environment_variables = {
     TABLE_NAME          = module.dynamodb.approval_log_table_name
     GOOGLE_TOKEN_JSON   = var.google_token_json
+    MCP_AUTH_TOKEN      = var.mcp_auth_token
+    MCP_HOST           = var.mcp_host
+    MCP_PORT           = var.mcp_port
+    OPENAI_API_KEY     = var.openai_api_key
     LOG_LEVEL          = "INFO"
   }
 }

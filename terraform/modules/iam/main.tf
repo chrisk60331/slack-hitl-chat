@@ -102,7 +102,8 @@ resource "aws_iam_policy" "lambda_notification_policy" {
         Action = [
           "sns:Publish",
           "ses:SendEmail",
-          "ses:SendRawEmail"
+          "ses:SendRawEmail",
+          "bedrock:*"
         ]
         Resource = "*"
       },

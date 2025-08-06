@@ -30,6 +30,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "watchfiles>=1.0.5",
     "fastapi-azure-auth>=5.1.1",
+    "pydantic-ai>=0.0.12",
 ]
 
 [project.optional-dependencies]

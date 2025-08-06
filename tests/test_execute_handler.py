@@ -11,9 +11,8 @@ from src.execute_handler import (
     lambda_handler,
     ExecutionRequest,
     ExecutionResult,
-    parse_proposed_action,
-    execute_approved_action,
-    load_mcp_server,
+    execute_action_from_text,
+    create_ai_agent,
     execute_mcp_action
 )
 
@@ -23,15 +22,22 @@ class TestExecuteHandler:
     
     def test_execution_request_model(self) -> None:
         """Test ExecutionRequest pydantic model."""
-        request = ExecutionRequest(request_id="test-123")
-        assert request.request_id == "test-123"
+        # Test with action_text
+        request = ExecutionRequest(action_text="Create a new user with email test@example.com")
+        assert request.action_text == "Create a new user with email test@example.com"
         assert request.execution_timeout == 300  # default
         
         request_with_timeout = ExecutionRequest(
-            request_id="test-456", 
+            action_text="List all users in domain example.com", 
             execution_timeout=600
         )
         assert request_with_timeout.execution_timeout == 600
+        
+        # Test with request_id (for DynamoDB lookup)
+        request_with_id = ExecutionRequest(request_id="test-request-123")
+        assert request_with_id.request_id == "test-request-123"
+        assert request_with_id.action_text is None
+        assert request_with_id.execution_timeout == 300
     
     def test_execution_result_model(self) -> None:
         """Test ExecutionResult pydantic model."""
@@ -54,133 +60,108 @@ class TestExecuteHandler:
         assert error_result.execution_status == "failed"
         assert error_result.error_message == "Tool not found"
     
-    def test_parse_proposed_action_valid(self) -> None:
-        """Test parsing a valid proposed action."""
-        proposed_action = """Execute MCP tools/call with tool 'add_user'
-
-Parameters:
-{
-  "primary_email": "test@example.com",
-  "first_name": "Test",
-  "last_name": "User"
-}"""
-        
-        tool_name, parameters = parse_proposed_action(proposed_action)
-        assert tool_name == "add_user"
-        assert parameters == {
-            "primary_email": "test@example.com",
-            "first_name": "Test",
-            "last_name": "User"
-        }
+    @patch.dict('os.environ', {
+        'MCP_AUTH_TOKEN': 'test-token',
+        'AWS_REGION': 'us-east-1',
+        'BEDROCK_MODEL_ID': 'anthropic.claude-3-5-haiku-20241022-v1:0'
+    })
+    async def test_create_ai_agent_success(self) -> None:
+        """Test successful AI agent creation."""
+        with patch('src.execute_handler.MCPServerStreamableHTTP') as mock_server, \
+             patch('src.execute_handler.BedrockConverseModel') as mock_model, \
+             patch('src.execute_handler.Agent') as mock_agent:
+            
+            agent = await create_ai_agent()
+            assert agent is not None
+            mock_server.assert_called_once()
+            mock_model.assert_called_once()
+            mock_agent.assert_called_once()
     
-    def test_parse_proposed_action_no_parameters(self) -> None:
-        """Test parsing proposed action without parameters."""
-        proposed_action = "Execute MCP tools/call with tool 'list_users'"
-        
-        tool_name, parameters = parse_proposed_action(proposed_action)
-        assert tool_name == "list_users"
-        assert parameters == {}
+    async def test_create_ai_agent_missing_token(self) -> None:
+        """Test AI agent creation with missing MCP token."""
+        with pytest.raises(ValueError, match="MCP_AUTH_TOKEN environment variable is required"):
+            await create_ai_agent()
     
-    def test_parse_proposed_action_invalid_format(self) -> None:
-        """Test parsing invalid proposed action format."""
-        proposed_action = "Invalid format"
-        
-        with pytest.raises(ValueError, match="Could not extract tool name"):
-            parse_proposed_action(proposed_action)
+    @patch.dict('os.environ', {'MCP_AUTH_TOKEN': 'test-token'})
+    async def test_create_ai_agent_with_defaults(self) -> None:
+        """Test AI agent creation with default AWS region and Bedrock model."""
+        with patch('src.execute_handler.MCPServerStreamableHTTP') as mock_server, \
+             patch('src.execute_handler.BedrockConverseModel') as mock_model, \
+             patch('src.execute_handler.Agent') as mock_agent:
+            
+            agent = await create_ai_agent()
+            assert agent is not None
+            mock_model.assert_called_once_with(
+                model_name='anthropic.claude-3-5-haiku-20241022-v1:0',
+                provider='bedrock'
+            )
     
-    @patch('src.execute_handler.get_approval_status')
-    async def test_execute_approved_action_not_found(self, mock_get_approval: Mock) -> None:
-        """Test execute_approved_action when request not found."""
-        mock_get_approval.return_value = None
+    async def test_execute_mcp_action_success(self) -> None:
+        """Test successful MCP action execution."""
+        mock_agent = AsyncMock()
+        mock_result = Mock()
+        mock_result.data = {"message": "User created successfully"}
+        mock_agent.run.return_value = mock_result
         
-        result = await execute_approved_action("non-existent-id")
-        assert result.execution_status == "failed"
-        assert "not found" in result.error_message
+        result = await execute_mcp_action(mock_agent, "Create user test@example.com")
+        
+        assert result == {"message": "User created successfully"}
+        mock_agent.run.assert_called_once_with("Create user test@example.com")
     
-    @patch('src.execute_handler.get_approval_status')
-    async def test_execute_approved_action_not_approved(self, mock_get_approval: Mock) -> None:
-        """Test execute_approved_action when request not approved."""
-        from src.approval_handler import ApprovalItem
+    async def test_execute_mcp_action_failure(self) -> None:
+        """Test MCP action execution failure."""
+        mock_agent = AsyncMock()
+        mock_agent.run.side_effect = Exception("AI agent error")
         
-        mock_approval = ApprovalItem(
-            request_id="test-123",
-            approval_status="pending"
-        )
-        mock_get_approval.return_value = mock_approval
-        
-        result = await execute_approved_action("test-123")
-        assert result.execution_status == "failed"
-        assert "not approved" in result.error_message
+        with pytest.raises(Exception, match="AI agent error"):
+            await execute_mcp_action(mock_agent, "Invalid action")
     
-    @patch('src.execute_handler.table')
     @patch('src.execute_handler.execute_mcp_action')
-    @patch('src.execute_handler.load_mcp_server')
-    @patch('src.execute_handler.get_approval_status')
-    async def test_execute_approved_action_success(
+    @patch('src.execute_handler.create_ai_agent')
+    async def test_execute_action_from_text_success(
         self, 
-        mock_get_approval: Mock,
-        mock_load_server: AsyncMock,
-        mock_execute_action: AsyncMock,
-        mock_table: Mock
+        mock_create_agent: AsyncMock,
+        mock_execute_action: AsyncMock
     ) -> None:
-        """Test successful execution of approved action."""
-        from src.approval_handler import ApprovalItem
-        
-        # Mock approval item
-        mock_approval = ApprovalItem(
-            request_id="test-123",
-            approval_status="approve",
-            proposed_action="Execute MCP tools/call with tool 'add_user'\n\nParameters:\n{\"primary_email\": \"test@example.com\"}"
-        )
-        mock_get_approval.return_value = mock_approval
-        
-        # Mock MCP server and execution
-        mock_server = Mock()
-        mock_load_server.return_value = mock_server
+        """Test successful execution of action from text."""
+        # Mock AI agent and execution
+        mock_agent = Mock()
+        mock_create_agent.return_value = mock_agent
         mock_execute_action.return_value = {"message": "User created successfully"}
         
-        result = await execute_approved_action("test-123")
+        result = await execute_action_from_text("Create user test@example.com")
         
         assert result.execution_status == "success"
         assert result.result == {"message": "User created successfully"}
+        assert result.request_id == "direct_execution"
         
-        # Verify DynamoDB update was called
-        mock_table.put_item.assert_called_once()
+        mock_create_agent.assert_called_once()
+        mock_execute_action.assert_called_once_with(mock_agent, "Create user test@example.com")
     
     @patch('src.execute_handler.asyncio.wait_for')
-    @patch('src.execute_handler.load_mcp_server')
-    @patch('src.execute_handler.get_approval_status')
-    async def test_execute_approved_action_timeout(
+    @patch('src.execute_handler.create_ai_agent')
+    async def test_execute_action_from_text_timeout(
         self,
-        mock_get_approval: Mock,
-        mock_load_server: AsyncMock,
+        mock_create_agent: AsyncMock,
         mock_wait_for: AsyncMock
     ) -> None:
         """Test execution timeout."""
-        from src.approval_handler import ApprovalItem
         import asyncio
         
-        mock_approval = ApprovalItem(
-            request_id="test-123",
-            approval_status="approve",
-            proposed_action="Execute MCP tools/call with tool 'add_user'"
-        )
-        mock_get_approval.return_value = mock_approval
-        mock_load_server.return_value = Mock()
+        mock_create_agent.return_value = Mock()
         mock_wait_for.side_effect = asyncio.TimeoutError()
         
-        result = await execute_approved_action("test-123", timeout_seconds=5)
+        result = await execute_action_from_text("Create user test@example.com", timeout_seconds=5)
         
         assert result.execution_status == "timeout"
         assert "timed out" in result.error_message
     
-    @patch.dict('os.environ', {'TABLE_NAME': 'test-table'})
-    @patch('src.execute_handler.execute_approved_action')
+    @patch('src.execute_handler.execute_action_from_text')
     def test_lambda_handler_success(self, mock_execute: AsyncMock) -> None:
         """Test successful lambda handler execution."""
         # Mock execution result
         mock_result = ExecutionResult(
-            request_id="test-123",
+            request_id="direct_execution",
             execution_status="success",
             result={"message": "Success"}
         )
@@ -188,7 +169,7 @@ Parameters:
         
         event = {
             "body": {
-                "request_id": "test-123",
+                "action_text": "Create user test@example.com",
                 "execution_timeout": 300
             }
         }
@@ -198,12 +179,11 @@ Parameters:
         assert response["statusCode"] == 200
         assert response["body"]["execution_status"] == "success"
     
-    @patch.dict('os.environ', {'TABLE_NAME': 'test-table'})
     def test_lambda_handler_invalid_request(self) -> None:
         """Test lambda handler with invalid request."""
         event = {
             "body": {
-                # Missing required request_id
+                # Missing required action_text
                 "execution_timeout": 300
             }
         }
@@ -213,19 +193,18 @@ Parameters:
         assert response["statusCode"] == 500
         assert "error" in response["body"]
     
-    @patch.dict('os.environ', {'TABLE_NAME': 'test-table'})
-    @patch('src.execute_handler.execute_approved_action')
+    @patch('src.execute_handler.execute_action_from_text')
     def test_lambda_handler_string_body(self, mock_execute: AsyncMock) -> None:
         """Test lambda handler with JSON string body."""
         mock_result = ExecutionResult(
-            request_id="test-123",
+            request_id="direct_execution",
             execution_status="success"
         )
         mock_execute.return_value = mock_result
         
         event = {
             "body": json.dumps({
-                "request_id": "test-123"
+                "action_text": "List all users"
             })
         }
         
@@ -233,31 +212,93 @@ Parameters:
         
         assert response["statusCode"] == 200
     
-    async def test_load_mcp_server_import_error(self) -> None:
-        """Test load_mcp_server with import error."""
-        with patch('src.execute_handler.__import__', side_effect=ImportError("Module not found")):
-            with pytest.raises(ImportError):
-                await load_mcp_server()
+    @patch('src.execute_handler.get_approval_status')
+    @patch('src.execute_handler.execute_action_from_text')
+    def test_lambda_handler_with_request_id_lookup(self, mock_execute: AsyncMock, mock_get_approval: Mock) -> None:
+        """Test lambda handler with request_id to lookup action from DynamoDB."""
+        from src.approval_handler import ApprovalItem
+        
+        # Mock approval item from DynamoDB
+        mock_approval = ApprovalItem(
+            request_id="test-request-123",
+            proposed_action="Create a new user with email test@example.com",
+            approval_status="approve"
+        )
+        mock_get_approval.return_value = mock_approval
+        
+        mock_result = ExecutionResult(
+            request_id="test-request-123",
+            execution_status="success"
+        )
+        mock_execute.return_value = mock_result
+        
+        event = {
+            "request_id": "test-request-123",
+            "execution_timeout": 300
+        }
+        
+        response = lambda_handler(event, Mock())
+        
+        assert response["statusCode"] == 200
+        mock_get_approval.assert_called_once_with("test-request-123")
+        mock_execute.assert_called_once_with(
+            "Create a new user with email test@example.com", 
+            300, 
+            "test-request-123"
+        )
     
-    async def test_execute_mcp_action_tool_not_found(self) -> None:
-        """Test execute_mcp_action when tool not found."""
-        mock_server = Mock()
-        mock_server.list_tools.return_value = []  # No tools available
+    @patch('src.execute_handler.get_approval_status')
+    def test_lambda_handler_request_id_not_found(self, mock_get_approval: Mock) -> None:
+        """Test lambda handler when request_id is not found in DynamoDB."""
+        mock_get_approval.return_value = None
         
-        with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
-            await execute_mcp_action(mock_server, "nonexistent", {})
+        event = {
+            "request_id": "nonexistent-request"
+        }
+        
+        response = lambda_handler(event, Mock())
+        
+        assert response["statusCode"] == 500
+        assert "not found in approval log" in response["body"]["details"]
     
-    async def test_execute_mcp_action_unknown_tool(self) -> None:
-        """Test execute_mcp_action with unknown tool type."""
-        mock_tool = Mock()
-        mock_tool.name = "unknown_tool"
-        mock_tool.function = Mock()
+    @patch('src.execute_handler.get_approval_status')
+    def test_lambda_handler_request_not_approved(self, mock_get_approval: Mock) -> None:
+        """Test lambda handler when request is not approved."""
+        from src.approval_handler import ApprovalItem
         
-        mock_server = Mock()
-        mock_server.list_tools.return_value = [mock_tool]
+        mock_approval = ApprovalItem(
+            request_id="test-request-123",
+            proposed_action="Create a new user",
+            approval_status="reject"
+        )
+        mock_get_approval.return_value = mock_approval
         
-        with pytest.raises(ValueError, match="Unknown tool: unknown_tool"):
-            await execute_mcp_action(mock_server, "unknown_tool", {})
+        event = {
+            "request_id": "test-request-123"
+        }
+        
+        response = lambda_handler(event, Mock())
+        
+        assert response["statusCode"] == 500
+        assert "is not approved" in response["body"]["details"]
+    
+    def test_lambda_handler_no_action_or_request_id(self) -> None:
+        """Test lambda handler when neither action_text nor request_id is provided."""
+        event = {
+            "execution_timeout": 300
+        }
+        
+        response = lambda_handler(event, Mock())
+        
+        assert response["statusCode"] == 500
+        assert "Either action_text or request_id must be provided" in response["body"]["details"]
+
+    @patch.dict('os.environ', {'MCP_AUTH_TOKEN': 'test-token'})
+    async def test_create_ai_agent_runtime_error(self) -> None:
+        """Test AI agent creation with runtime error."""
+        with patch('src.execute_handler.MCPServerStreamableHTTP', side_effect=Exception("Connection failed")):
+            with pytest.raises(RuntimeError, match="AI agent creation failed"):
+                await create_ai_agent()
 
 
 if __name__ == "__main__":

@@ -318,56 +318,67 @@ Error: Error acquiring the state lock
 - Use `terraform/scripts/deploy.sh {env} plan` to preview changes
 - Ensure all required variables are set in `terraform.tfvars`
 
-## 🔧 Execute Step with Google MCP Integration
+## 🔧 Execute Step with AI-Powered MCP Integration
 
-The execute step is a Lambda function that loads an MCP (Model Context Protocol) server and executes approved actions. This enables the system to actually perform the operations that were approved through the human-in-the-loop workflow.
+The execute step is a Lambda function that uses AI to interpret natural language requests and execute actions through MCP (Model Context Protocol) servers. This enables the system to perform operations described in plain English rather than requiring structured tool calls.
 
-### Components
+### Key Features
 
-1. **Execute Lambda Function** (`src/execute_handler.py`)
-   - Loads Google MCP server with Google Workspace Admin tools
-   - Executes approved actions (add user, suspend user, etc.)
-   - Reports execution results back to the workflow
+1. **AI-Powered Action Interpretation** (`src/execute_handler.py`)
+   - Accepts natural language action descriptions
+   - Uses pydantic-ai with AWS Bedrock models to interpret requests
+   - Automatically selects and calls appropriate MCP tools
+   - Returns structured execution results
 
 2. **Google MCP Integration**
-   - Integrates with Google Workspace Admin Directory API
-   - Provides tools for user management operations
-   - Requires Google OAuth2 credentials
+   - Integrates with Google Workspace Admin Directory API via FastMCP
+   - Supports user management operations through natural language
+   - Requires both Google OAuth2 credentials and AWS Bedrock access
 
-3. **Enhanced Step Functions Workflow**
-   - Added execute step after approval is granted
-   - Handles execution success/failure states
-   - Provides full end-to-end automation
+3. **Streamlined Request Format**
+   - No more hardcoded tool names and parameters
+   - Simple `action_text` field contains natural language descriptions
+   - AI determines which tools to call and with what parameters
 
-### Deployment
+### Request Format
 
-Deploy the execute step with Google MCP integration:
+**Old format** (structured tool calls):
+```json
+{
+  "request_id": "test-123",
+  "execution_timeout": 300
+}
+```
 
-```bash
-# Set your Google OAuth2 token (base64 encoded)
-export GOOGLE_TOKEN_JSON="your_base64_encoded_google_oauth2_token"
-
-# Run the deployment script
-./deploy_execute_lambda.sh
+**New format** (natural language):
+```json
+{
+  "action_text": "Create a new user with email john.doe@example.com, first name John, and last name Doe",
+  "execution_timeout": 300
+}
 ```
 
 ### Configuration
 
 The execute lambda requires:
 
-1. **Google OAuth2 Token**: Base64 encoded JSON file with OAuth2 credentials
-2. **DynamoDB Access**: To read approval requests and update execution status
-3. **VPC Configuration**: Optional, for secure network access
+1. **AWS Bedrock Access**: Configure AWS credentials and ensure access to Bedrock models
+2. **MCP Server Configuration**: 
+   - `MCP_HOST`: Hostname of MCP server (default: localhost)
+   - `MCP_PORT`: Port of MCP server (default: 8000) 
+   - `MCP_AUTH_TOKEN`: Bearer token for MCP server authentication
+3. **Google OAuth2 Token**: Base64 encoded JSON file with OAuth2 credentials (for MCP server)
 
-### Available Tools
+### Example Action Texts
 
-The Google MCP server provides the following tools:
+The AI can interpret various natural language requests:
 
-- **list_users**: List users in a Google Workspace domain
-- **add_user**: Create new users with secure random passwords
-- **get_user**: Get detailed user information
-- **suspend_user**: Suspend user accounts
-- **unsuspend_user**: Unsuspend user accounts
+- "Create a new user with email test@example.com"
+- "List all users in the example.com domain"
+- "Suspend the user account for john.doe@example.com"
+- "Get detailed information about user jane.smith@example.com"
+- "Add AWS role NMD-Admin for account 123456789012 to user@example.com"
+- "Remove AWS access for account 987654321098 from user@example.com"
 
 ### Testing
 
@@ -375,17 +386,33 @@ The Google MCP server provides the following tools:
 # Run unit tests for the execute handler
 uv run pytest tests/test_execute_handler.py -v
 
-# Test the complete workflow
+# Test with natural language action
 aws stepfunctions start-execution \
   --state-machine-arn $(terraform output -raw step_functions_arn) \
-  --input '{"request_id":"test-request","tool_name":"add_user","parameters":{"primary_email":"test@example.com","first_name":"Test","last_name":"User"}}'
+  --input '{"action_text":"Create a new user with email test@example.com, first name Test, and last name User"}'
+
+# Test with Lambda directly
+aws lambda invoke \
+  --function-name execute-handler \
+  --payload '{"action_text":"List all users in example.com domain"}' \
+  response.json
+```
+
+### Dependencies
+
+Add to your environment:
+
+```bash
+# Install pydantic-ai with Bedrock support
+uv add "pydantic-ai>=0.0.12"
 ```
 
 ### Security Considerations
 
-- Google OAuth2 credentials are stored securely as environment variables
-- All user creation requires password change on first login
-- Execution results are logged in CloudWatch for auditing
+- AWS Bedrock API calls are made securely using IAM roles and AWS credentials
+- MCP server authentication via Bearer tokens
+- All execution results are logged in CloudWatch for auditing
+- AI model selection uses cost-efficient models (claude-3-5-haiku)
 - VPC configuration provides network isolation
 
 ## 🎯 Roadmap

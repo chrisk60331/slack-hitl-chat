@@ -145,3 +145,29 @@ variable "execute_lambda_memory_size" {
   type        = number
   default     = 512
 }
+
+variable "mcp_auth_token" {
+  description = "Bearer token for MCP server authentication"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "mcp_host" {
+  description = "MCP server host"
+  type        = string
+  default     = "localhost"
+}
+
+variable "mcp_port" {
+  description = "MCP server port"
+  type        = string
+  default     = "8000"
+}
+
+variable "openai_api_key" {
+  description = "OpenAI API key for GPT models"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

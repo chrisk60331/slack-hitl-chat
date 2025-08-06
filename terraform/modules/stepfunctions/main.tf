@@ -45,6 +45,7 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
       }
       CheckApprovalStatus = {
         Type = "Choice"
+
         Choices = [
           {
             Variable      = "$.body.status"
@@ -71,9 +72,10 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
       }
       ApprovalGranted = {
         Type   = "Pass"
-        Result = {
-          status  = "approved"
-          message = "Request has been approved"
+        Parameters = {
+          "status" = "approved"
+          "message" = "Request has been approved"
+          "request_id.$" = "$.body.request_id"
         }
         Next = "ExecuteApprovedAction"
       }
@@ -81,7 +83,7 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         Type     = "Task"
         Resource = var.execute_lambda_function_arn
         Parameters = {
-          "request_id.$" = "$.body.request_id"
+          "request_id.$" = "$.request_id"
           "execution_timeout" = 300
         }
         Retry = [

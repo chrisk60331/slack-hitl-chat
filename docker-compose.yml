@@ -18,46 +18,18 @@ services:
       dockerfile: Dockerfile
       target: execute
     container_name: agentcore-execute-local
+    env_file: .env
     environment:
-      # AWS credentials (use local DynamoDB)
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
-      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
-      
-      # Application environment
-      - TABLE_NAME=agentcore-approvals-local
-      - LOG_LEVEL=DEBUG
-      - PYTHONPATH=/var/task:/var/task/src
-      
-      # Google Workspace Admin API Configuration
-      - GOOGLE__ADMIN_EMAIL=${GOOGLE__ADMIN_EMAIL:-admin@example.com}
-      - GOOGLE__TYPE=${GOOGLE__TYPE:-service_account}
-      - GOOGLE__PROJECT_ID=${GOOGLE__PROJECT_ID:-your-project-id}
-      - GOOGLE__PRIVATE_KEY_ID=${GOOGLE__PRIVATE_KEY_ID:-your-key-id}
-      - GOOGLE__PRIVATE_KEY=${GOOGLE__PRIVATE_KEY:-placeholder-key}
-      - GOOGLE__CLIENT_EMAIL=${GOOGLE__CLIENT_EMAIL:-service-account@project.iam.gserviceaccount.com}
-      - GOOGLE__CLIENT_ID=${GOOGLE__CLIENT_ID:-your-client-id}
-      - GOOGLE__AUTH_URI=${GOOGLE__AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
-      - GOOGLE__TOKEN_URI=${GOOGLE__TOKEN_URI:-https://oauth2.googleapis.com/token}
-      - GOOGLE__AUTH_PROVIDER_X509_CERT_URL=${GOOGLE__AUTH_PROVIDER_X509_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
-      - GOOGLE__CLIENT_X509_CERT_URL=${GOOGLE__CLIENT_X509_CERT_URL:-https://www.googleapis.com/robot/v1/metadata/x509/service-account%40project.iam.gserviceaccount.com}
-      - GOOGLE__UNIVERSE_DOMAIN=${GOOGLE__UNIVERSE_DOMAIN:-googleapis.com}
-      
-      # Azure configuration (required by settings validation)
-      - AZURE__TENANT_ID=${AZURE__TENANT_ID:-dummy-tenant-id}
-      - AZURE__APP_CLIENT_ID=${AZURE__APP_CLIENT_ID:-dummy-app-client-id}
-      - AZURE__OPENAPI_CLIENT_ID=${AZURE__OPENAPI_CLIENT_ID:-dummy-openapi-client-id}
-      
       # Lambda runtime simulation
       - LAMBDA_TASK_ROOT=/var/task
       - _HANDLER=src.execute_handler.lambda_handler
+      - TABLE_NAME=agentcore-approvals-local
+      - LOCAL_DEV=true
     ports:
       - "9000:8080"  # Lambda Runtime Interface Emulator port
     volumes:
-      # Mount source for development
-      - ./src:/var/task/src:ro
       - ./tests:/var/task/tests:ro
+      - .env:/var/task/.env:ro
     depends_on:
       - dynamodb-local
     networks:

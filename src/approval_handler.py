@@ -46,9 +46,22 @@ class ApprovalDecision(BaseModel):
     reason: str = ""
 
 
+if os.getenv('LOCAL_DEV') == 'true':
+    ddb_params = {
+        'endpoint_url': 'http://agentcore-dynamodb-local:8000',
+        'aws_access_key_id': 'test',
+        'aws_secret_access_key': 'test'
+    }
+else:
+    ddb_params = {}
+
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
-sns = boto3.client('sns')
+dynamodb = boto3.resource(
+    'dynamodb',
+    region_name=os.environ['AWS_REGION'],
+    **ddb_params
+)
+sns = boto3.client('sns', region_name=os.environ['AWS_REGION'])
 
 # Configuration
 TABLE_NAME = os.environ['TABLE_NAME']
@@ -97,13 +110,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response dictionary with status and data
     """
+    print(f"Approval handler received event: {event}")
     try:
         # Handle approval decision (POST with approval data)
         if _is_approval_decision(event):
             return _handle_approval_decision(event)
         
         # Handle status check (existing request ID lookup)
-        elif event.get('Input', {}).get('body', {}).get('request_id'):
+        elif _has_request_id_for_status_check(event):
             return _handle_status_check(event)
         
         # Handle new approval request creation
@@ -137,6 +151,49 @@ def _is_approval_decision(event: Dict[str, Any]) -> bool:
     # Check for query parameters (for GET requests with approval)
     query_params = event.get('queryStringParameters') or {}
     return 'action' in query_params and 'request_id' in query_params
+
+
+def _has_request_id_for_status_check(event: Dict[str, Any]) -> bool:
+    """Check if the event has a request_id for status checking."""
+    # Check various possible locations for request_id in Step Functions input
+    # Direct access to request_id
+    if event.get('request_id'):
+        return True
+    
+    # Step Functions Input format
+    if event.get('Input', {}).get('body', {}).get('request_id'):
+        return True
+    
+    # Direct body access
+    if event.get('body', {}).get('request_id'):
+        return True
+    
+    # Query parameters
+    if event.get('queryStringParameters', {}).get('request_id'):
+        return True
+    
+    return False
+
+
+def _extract_request_id_for_status_check(event: Dict[str, Any]) -> str:
+    """Extract request_id from various possible event structures."""
+    # Try direct access first
+    if event.get('request_id'):
+        return event['request_id']
+    
+    # Step Functions Input format
+    if event.get('Input', {}).get('body', {}).get('request_id'):
+        return event['Input']['body']['request_id']
+    
+    # Direct body access
+    if event.get('body', {}).get('request_id'):
+        return event['body']['request_id']
+    
+    # Query parameters
+    if event.get('queryStringParameters', {}).get('request_id'):
+        return event['queryStringParameters']['request_id']
+    
+    raise ValueError("No request_id found in event for status check")
 
 
 def _handle_approval_decision(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,14 +278,13 @@ def _extract_decision_data(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _handle_status_check(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle existing status check requests."""
-    request_id = event.get('Input').get('body').get('request_id')
+    request_id = _extract_request_id_for_status_check(event)
     response = table.get_item(Key={'request_id': request_id})
     item_data = response.get('Item')
     if not item_data:
-        raise ValueError(f"Request ID {request_id} not found in approval log.")
+        raise ValueError(f"Approval request {request_id} not found")
     
     approval_item = ApprovalItem.from_dynamodb_item(item_data)
-    event['approval_status'] = approval_item.approval_status
     
     response_data = {
         'request_id': approval_item.request_id,
@@ -250,6 +306,9 @@ def _handle_status_check(event: Dict[str, Any]) -> Dict[str, Any]:
 def _handle_new_approval_request(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle new approval request creation."""
     # Create new approval request
+    if 'Input' in event:
+        event = event['Input']
+
     approval_item = ApprovalItem(
         requester=event.get('requester', ''),
         approver=event.get('approver', ''),
@@ -280,7 +339,8 @@ def _handle_new_approval_request(event: Dict[str, Any]) -> Dict[str, Any]:
         'request_id': approval_item.request_id,
         'status': action,
         'timestamp': approval_item.timestamp,
-        'notification_sent': notification_sent
+        'notification_sent': notification_sent,
+        'proposed_action': approval_item.proposed_action
     }
     
     return {

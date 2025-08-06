@@ -81,6 +81,7 @@ resource "docker_image" "lambda" {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
     handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
+    mcp_client     = filesha256("${var.source_path}/src/mcp_client.py")
     package_sha    = sha256("")
   }
 }
@@ -98,6 +99,7 @@ resource "docker_registry_image" "lambda" {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
     handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
+    mcp_client     = filesha256("${var.source_path}/src/mcp_client.py")
     package_sha    = sha256("")
   }
 }
