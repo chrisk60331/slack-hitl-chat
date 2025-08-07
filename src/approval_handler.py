@@ -46,7 +46,7 @@ class ApprovalDecision(BaseModel):
     reason: str = ""
 
 
-if os.getenv('LOCAL_DEV') == 'true':
+if os.getenv('LOCAL_DEV', 'false') == 'true':
     ddb_params = {
         'endpoint_url': 'http://agentcore-dynamodb-local:8000',
         'aws_access_key_id': 'test',

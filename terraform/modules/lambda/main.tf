@@ -61,6 +61,14 @@ resource "aws_ecr_lifecycle_policy" "lambda_policy" {
   })
 }
 
+# Archive a single file.
+
+data "archive_file" "src" {
+  type        = "zip"
+  source_dir  = "${var.source_path}src/"
+  output_path = "${var.source_path}/repo.zip"
+}
+
 # Build and push Docker image
 resource "docker_image" "lambda" {
   name = "${aws_ecr_repository.lambda.repository_url}:latest"
@@ -80,9 +88,7 @@ resource "docker_image" "lambda" {
   triggers = {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
-    handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
-    mcp_client     = filesha256("${var.source_path}/src/mcp_client.py")
-    package_sha    = sha256("")
+    src_sha        = filesha256(data.archive_file.src.output_path)
   }
 }
 
@@ -98,9 +104,7 @@ resource "docker_registry_image" "lambda" {
   triggers = {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
-    handler_sha    = filesha256("${var.source_path}/${var.handler_file}")
-    mcp_client     = filesha256("${var.source_path}/src/mcp_client.py")
-    package_sha    = sha256("")
+    src_sha        = filesha256(data.archive_file.src.output_path)
   }
 }
 
