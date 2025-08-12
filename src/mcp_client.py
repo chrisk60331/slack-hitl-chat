@@ -12,10 +12,36 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 load_dotenv()  # load environment variables from .env
-
+MAX_ITERATIONS = 20  # Increased limit for complex operations
 # Set up logging
 logger = logging.getLogger(__name__)
 print(f"Logger: {logger}")
+
+# System instructions to guide tool usage, especially AWS role add/remove
+SYSTEM_PROMPT: str = (
+    "You are an execution agent that must correctly call MCP tools.\n"
+    "General rules:\n"
+    "- Always pass tool inputs under a top-level 'request' object, matching the tool's input schema.\n"
+    "- Prefer idempotent behavior: check state first, then add/remove only if needed.\n"
+    "- Only claim success if the final tool confirms success; otherwise state the actual outcome (already had role / not found / error).\n\n"
+    "AWS role access management:\n"
+    "- To GRANT access, call add_amazon_role with fields: user_key, admin_role, identity_provider. Account ID is derived from ARNs.\n"
+    "  - admin_role MUST be the FULL AWS role ARN in the form arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME.\n"
+    "  - identity_provider defaults to NMDGoogle if not specified.\n"
+    "- To REVOKE access, call remove_amazon_role with the same fields.\n"
+    "- Parse role ARNs provided in user requests. Example: from 'arn:aws:iam::250623887600:role/NMD-Admin-Scaia'\n"
+    "  - example admin_role = arn:aws:iam::123456789012:role/Admin\n"
+    "  - admin_role = arn:aws:iam::250623887600:role/NMD-Admin-Scaia\n\n"
+    "Idempotency flow:\n"
+    "- Before add/remove, call get_amazon_roles to see current assignments for the user.\n"
+    "- If the exact role already exists for that account, report 'already has role' and do NOT call add_amazon_role.\n"
+    "- If removing and the role is not present, report 'role not found' and do NOT call remove_amazon_role.\n\n"
+    "Examples (tool input payloads):\n"
+    "- add_amazon_role input: {\"request\":{\"user_key\":\"user@example.com\",\"admin_role\":\"arn:aws:iam::123456789012:role/NMD-Admin\",\"identity_provider\":\"arn:aws:iam::108968357292:saml-provider/NMDGoogle\"}}\n"
+    "- remove_amazon_role input: {\"request\":{\"user_key\":\"user@example.com\",\"admin_role\":\"arn:aws:iam::123456789012:role/NMD-Admin\",\"identity_provider\":\"arn:aws:iam::108968357292:saml-provider/NMDGoogle\"}}\n\n"
+    "Error correction:\n"
+    "- If a tool returns 'Invalid role format' or indicates missing fields, immediately retry with admin_role set to the full ARN and ensure identity_provider is included.\n"
+)
 class MCPClient:
     """MCP Client for connecting to MCP servers and processing queries using Claude on Bedrock."""
     
@@ -82,19 +108,20 @@ class MCPClient:
             "input_schema": tool.inputSchema
         } for tool in response.tools]
 
-        max_iterations = 10  # Increased limit for complex operations
+        
         iteration = 0
         
-        while iteration < max_iterations:
+        while iteration < MAX_ITERATIONS:
             iteration += 1
-            logger.info(f"Starting conversation iteration {iteration}/{max_iterations}")
+            logger.info(f"Starting conversation iteration {iteration}/{MAX_ITERATIONS}")
             
             # Prepare request body for Bedrock
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 2000,  # Increased token limit
                 "messages": messages,
-                "tools": available_tools
+                "tools": available_tools,
+                "system": SYSTEM_PROMPT,
             }
 
             # Claude API call via Bedrock
@@ -168,7 +195,7 @@ class MCPClient:
             })
         
         # If we reach here, we hit max iterations
-        return f"Task partially completed but reached maximum conversation iterations ({max_iterations}). The assistant may need simpler instructions or the task may be too complex for automated execution."
+        return f"Task partially completed but reached maximum conversation iterations ({MAX_ITERATIONS}). The assistant may need simpler instructions or the task may be too complex for automated execution."
 
     async def chat_loop(self) -> None:
         """Run an interactive chat loop."""

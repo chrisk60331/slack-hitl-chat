@@ -4,6 +4,8 @@ AgentCore HITL MCP Integration Package.
 This package provides Human-in-the-Loop (HITL) capabilities for MCP servers,
 enabling approval workflows for high-risk operations.
 """
+from dotenv import load_dotenv
+load_dotenv()
 
 from .approval_handler import ApprovalItem, ApprovalDecision, get_approval_status
 # Removed imports for deleted modules

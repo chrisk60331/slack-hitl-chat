@@ -575,4 +575,70 @@ class TestSendNotifications:
             reason='Test reason'
         )
         
-        assert result is False 
+        assert result is False
+
+class TestSlackNotification:
+    """Tests for Slack webhook integration."""
+
+    @patch('src.approval_handler.requests.post')
+    def test_send_slack_notification_basic(self, mock_post: Mock) -> None:
+        from src.approval_handler import send_slack_notification
+
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.text = 'ok'
+
+        content = {
+            'title': 'AgentCore HITL Pending Approval',
+            'request_id': 'req-1',
+            'status': 'pending',
+            'requester': 'alice',
+            'approver': '',
+            'agent_prompt': 'Please reset password for bob',
+            'proposed_action': 'Reset password for bob',
+            'reason': '',
+            'timestamp': '2025-01-01 00:00:00 UTC'
+        }
+
+        with patch.dict('os.environ', {'SLACK_WEBHOOK_URL': 'https://hooks.slack.com/services/T/X/Y'}):
+            assert send_slack_notification(content) is True
+            mock_post.assert_called_once()
+
+    @patch('src.approval_handler.requests.post')
+    def test_send_slack_notification_no_webhook(self, mock_post: Mock) -> None:
+        from src.approval_handler import send_slack_notification
+        content = {
+            'title': 't', 'request_id': 'r', 'status': 'approve', 'requester': 'u',
+            'approver': 'a', 'agent_prompt': 'p', 'proposed_action': 'pa', 'reason': ''
+        }
+        with patch.dict('os.environ', {}, clear=True):
+            assert send_slack_notification(content) is False
+            mock_post.assert_not_called()
+
+    @patch('src.approval_handler.requests.post')
+    def test_send_slack_notification_pending_includes_links(self, mock_post: Mock) -> None:
+        from src.approval_handler import send_slack_notification
+
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.text = 'ok'
+
+        content = {
+            'title': 'AgentCore HITL Pending Approval',
+            'request_id': 'req-2',
+            'status': 'pending',
+            'requester': 'alice',
+            'approver': '',
+            'agent_prompt': 'Action',
+            'proposed_action': 'Do something',
+            'reason': '',
+            'timestamp': '2025-01-01 00:00:00 UTC'
+        }
+
+        with patch.dict('os.environ', {
+            'SLACK_WEBHOOK_URL': 'https://hooks.slack.com/services/T/X/Y',
+            'LAMBDA_FUNCTION_URL': 'https://lambda-url'
+        }):
+            assert send_slack_notification(content)
+            args, kwargs = mock_post.call_args
+            assert 'json' in kwargs
+            assert 'Approve: https://lambda-url?request_id=req-2&action=approve' in kwargs['json']['text']
+            assert 'Reject: https://lambda-url?request_id=req-2&action=reject' in kwargs['json']['text'] 

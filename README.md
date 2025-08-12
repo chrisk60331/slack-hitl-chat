@@ -147,6 +147,18 @@ lambda_memory_size = 256
 # Notification Configuration
 # slack_webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
 # teams_webhook_url = "https://outlook.office.com/webhook/YOUR/TEAMS/WEBHOOK"
+#
+# Block Kit (preferred):
+# - Create a Slack app with a Bot user and enable Interactivity.
+# - Set Interactivity Request URL to: https://<your-api-host>/slack/interactions
+# - Add scopes: chat:write
+# - Configure environment variables:
+#   - SLACK_BOT_TOKEN
+#   - SLACK_SIGNING_SECRET
+#   - SLACK_CHANNEL_ID
+# When SLACK_BOT_TOKEN and SLACK_CHANNEL_ID are set, pending approvals will be posted
+# with interactive Approve/Reject buttons. Slack link unfurling is disabled for these
+# messages and approvals are received via the interactivity endpoint.
 
 # Bedrock Configuration
 # enable_bedrock_guardrails = true
@@ -334,6 +346,10 @@ The execute step is a Lambda function that uses AI to interpret natural language
    - Integrates with Google Workspace Admin Directory API via FastMCP
    - Supports user management operations through natural language
    - Requires both Google OAuth2 credentials and AWS Bedrock access
+ - Validated AWS role management via Pydantic models:
+   - `admin_role`: matches `^arn:aws:iam::\d{12}:role/[a-zA-Z0-9_-]+$`
+   - `identity_provider`: matches `^arn:aws:iam::\d{12}:saml-provider/[a-zA-Z0-9_-]+$`
+   - Account ID is derived from the provided ARNs
 
 3. **Streamlined Request Format**
    - No more hardcoded tool names and parameters
@@ -426,3 +442,41 @@ uv add "pydantic-ai>=0.0.12"
 - [x] Execute step with MCP server integration
 - [ ] Support for additional MCP servers and tools
 - [ ] Enhanced error handling and retry mechanisms 
+
+## 🧠 Orchestrator Wrapper
+
+A higher-level orchestrator wraps existing approval/execution handlers and the MCP client without modifying them. It adds:
+
+- Policy engine (deterministic rules) to decide allow/approval/deny
+- Step Functions integration to request and await approvals
+- Short-term memory to enrich prompts with recent context
+- FastAPI API and Click CLI to trigger runs
+
+Modules:
+
+- `src/policy.py`: `ApprovalCategory`, `PolicyRule`, `PolicyEngine`
+- `src/memory.py`: `ShortTermMemory`
+- `src/orchestrator.py`: `AgentOrchestrator`
+- `src/api.py`: FastAPI app (`/agent/run`)
+- `src/cli.py`: CLI (`hitl-mcp run`)
+
+Environment:
+
+- `APPROVAL_SFN_ARN` (optional locally)
+- `AWS_REGION`
+- `ENVIRONMENT`
+- `POLICY_PATH` (optional)
+
+Run API locally:
+
+```bash
+uv run uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+CLI example:
+
+```bash
+uv run hitl-mcp run --user-id alice --query "reset a user's password" --category privileged_write
+```
+
+Design references: [runtime example](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/main/01-tutorials/01-AgentCore-runtime/01-hosting-agent/01-strands-with-bedrock-model/runtime_with_strands_and_bedrock_models.ipynb), [memory example](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/main/01-tutorials/04-AgentCore-memory/01-short-term-memory/01-single-agent/with-strands-agent/personal-agent.ipynb)

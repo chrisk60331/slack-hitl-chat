@@ -68,35 +68,29 @@ TABLE_NAME = os.environ['TABLE_NAME']
 SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN', '')
 LAMBDA_FUNCTION_URL = os.environ.get('LAMBDA_FUNCTION_URL', '')
 
+# Optional webhook integrations
+SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
+TEAMS_WEBHOOK_URL = os.environ.get('TEAMS_WEBHOOK_URL', '')
+
 table = dynamodb.Table(TABLE_NAME)
 
 
 def get_lambda_function_url() -> str:
     """
-    Get the Lambda function URL, either from environment or by querying AWS.
-    
+    Resolve the Lambda Function URL for approval action links.
+
     Returns:
         The Lambda function URL or empty string if not available
     """
-    # First try environment variable
-    if LAMBDA_FUNCTION_URL:
-        return LAMBDA_FUNCTION_URL
-    
-    # If not in environment, try to get it dynamically
     try:
-        import boto3
-        lambda_client = boto3.client('lambda')
-        
-        # Get function name from the context or environment
-        function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'agentcore_hitl_approval')
-        
-        # Get function URL configuration
+        lambda_client = boto3.client('lambda', region_name=os.environ['AWS_REGION'])
+        function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
+
         response = lambda_client.get_function_url_config(FunctionName=function_name)
         return response.get('FunctionUrl', '')
-        
-    except Exception as e:
-        print(f"Warning: Could not retrieve Lambda function URL: {e}")
+    except Exception:
         return ''
+
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -113,6 +107,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     print(f"Approval handler received event: {event}")
     try:
         # Handle approval decision (POST with approval data)
+        # Opportunistic validation to surface parsing errors early (helps tests and debugging)
+        body = event.get('body')
+        if body is not None:
+            try:
+                # This will raise if body is invalid JSON when provided as a string
+                _ = _extract_decision_data({'body': body})
+            except Exception:
+                # Re-raise to be handled by the generic error block below
+                raise
+
+        # Route the request
         if _is_approval_decision(event):
             return _handle_approval_decision(event)
         
@@ -165,8 +170,16 @@ def _has_request_id_for_status_check(event: Dict[str, Any]) -> bool:
         return True
     
     # Direct body access
-    if event.get('body', {}).get('request_id'):
+    body = event.get('body')
+    if isinstance(body, dict) and body.get('request_id'):
         return True
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and parsed.get('request_id'):
+                return True
+        except Exception:
+            pass
     
     # Query parameters
     if event.get('queryStringParameters', {}).get('request_id'):
@@ -186,8 +199,16 @@ def _extract_request_id_for_status_check(event: Dict[str, Any]) -> str:
         return event['Input']['body']['request_id']
     
     # Direct body access
-    if event.get('body', {}).get('request_id'):
-        return event['body']['request_id']
+    body = event.get('body')
+    if isinstance(body, dict) and body.get('request_id'):
+        return body['request_id']
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and parsed.get('request_id'):
+                return parsed['request_id']
+        except Exception:
+            pass
     
     # Query parameters
     if event.get('queryStringParameters', {}).get('request_id'):
@@ -392,7 +413,8 @@ def send_notifications(
         status_emoji = "❌"
         action_text = "Rejected"
         status = "❌ Rejected"
-    
+    approval_link = f"{get_lambda_function_url()}?request_id={request_id}&action=approve&approver=admin"
+    rejection_link = f"{get_lambda_function_url()}?request_id={request_id}&action=reject&approver=admin"
     message_content = {
         'title': f"AgentCore HITL {action_text}",
         'request_id': request_id,
@@ -401,19 +423,47 @@ def send_notifications(
         'approver': approver,
         'agent_prompt': agent_prompt[:500] + "..." if len(agent_prompt) > 500 else agent_prompt,
         'proposed_action': proposed_action[:300] + "..." if len(proposed_action) > 300 else proposed_action,
+        'approval_link': approval_link,
+        'rejection_link': rejection_link,
         'reason': reason,
         'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     }
 
+    # Slack notifications
     try:
-        sns_message = format_sns_message(message_content)
-        sns.publish(
-            TopicArn=SNS_TOPIC_ARN,
-            Subject=f"AgentCore HITL {message_content['status']}",
-            Message=sns_message
-        )
-        notification_sent = True
-        print(f"SNS notification sent for request {request_id}")
+        # Prefer Block Kit via bot token and channel when configured
+        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN")
+        slack_channel_id = os.environ.get("SLACK_CHANNEL_ID")
+        if slack_bot_token and slack_channel_id:
+            from .slack_helper import post_slack_block_approval
+
+            if action == "pending":
+                if post_slack_block_approval(message_content, channel_id=slack_channel_id, bot_token=slack_bot_token):
+                    notification_sent = True
+                    print(f"Slack Block Kit message sent for request {request_id}")
+        # Fallback to webhook when configured
+        elif SLACK_WEBHOOK_URL:
+            from .slack_helper import post_slack_webhook_message
+
+            if post_slack_webhook_message(
+                message_content, function_url_getter=get_lambda_function_url
+            ):
+                notification_sent = True
+                print(f"Slack webhook notification sent for request {request_id}")
+    except Exception as e:  # pragma: no cover - defensive
+        print(f"Error sending Slack notification: {e}")
+
+    # SNS topic (optional)
+    try:
+        if SNS_TOPIC_ARN:
+            sns_message = format_sns_message(message_content)
+            sns.publish(
+                TopicArn=SNS_TOPIC_ARN,
+                Subject=f"AgentCore HITL {message_content['status']}",
+                Message=sns_message
+            )
+            notification_sent = True
+            print(f"SNS notification sent for request {request_id}")
     except Exception as e:
         print(f"Error sending SNS notification: {e}")
 
@@ -457,6 +507,23 @@ Note: Click the links above to approve or reject this request."""
     return base_message.strip()
 
 
+def send_slack_notification(content: Dict[str, str]) -> bool:
+    """Deprecated: use slack_helper.post_slack_webhook_message instead.
+
+    This function remains for backward-compatibility with existing tests and
+    will delegate to the helper module. Once external callers have migrated,
+    this can be removed.
+    """
+    try:
+        from .slack_helper import post_slack_webhook_message
+
+        return post_slack_webhook_message(
+            content, function_url_getter=get_lambda_function_url
+        )
+    except Exception:
+        return False
+
+
 def get_approval_status(request_id: str) -> Optional[ApprovalItem]:
     """
     Retrieve approval status from DynamoDB.
@@ -470,6 +537,7 @@ def get_approval_status(request_id: str) -> Optional[ApprovalItem]:
     try:
         response = table.get_item(Key={'request_id': request_id})
         item_data = response.get('Item')
+        print(f"Approval item data: {item_data}")
         if item_data:
             return ApprovalItem.from_dynamodb_item(item_data)
         return None
