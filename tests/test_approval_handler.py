@@ -21,7 +21,8 @@ from src.approval_handler import (
     _is_approval_decision,
     _handle_approval_decision,
     _extract_decision_data,
-    lambda_handler
+    lambda_handler,
+    compute_request_id_from_action
 )
 
 
@@ -109,6 +110,22 @@ class TestApprovalItem:
         item2 = ApprovalItem()
         
         assert item1.request_id != item2.request_id
+
+
+class TestDeterministicRequestId:
+    """Tests for deterministic request_id hashing from proposed action."""
+
+    def test_compute_request_id_from_action_deterministic(self) -> None:
+        a = "Reset password for bob"
+        b = "Reset password for bob"
+        c = "Reset password for alice"
+        ra1 = compute_request_id_from_action(a)
+        ra2 = compute_request_id_from_action(b)
+        rc = compute_request_id_from_action(c)
+        assert ra1 == ra2
+        assert ra1 != rc
+        assert isinstance(ra1, str)
+        assert len(ra1) == 64  # sha256 hex digest length
 
 
 class TestApprovalDecision:
@@ -402,6 +419,47 @@ class TestLambdaHandler:
         assert result['statusCode'] == 200
         assert result['body']['status'] == 'reject'
         assert result['body']['approver'] == 'admin_user'
+
+    @mock_aws
+    @patch('src.approval_handler.TABLE_NAME', 'test-table')
+    @patch('src.approval_handler.send_notifications')
+    def test_lambda_handler_new_request_dedup_by_action(self, mock_send_notifications: Mock) -> None:
+        """Second identical proposed_action should reuse the same request_id and not notify."""
+        # Setup mock DynamoDB
+        dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+        table = dynamodb.create_table(
+            TableName='test-table',
+            KeySchema=[{'AttributeName': 'request_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'request_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+
+        event = {
+            'requester': 'test_user',
+            'agent_prompt': 'Test prompt',
+            'proposed_action': 'Reset password for bob',
+            'reason': 'Test reason'
+        }
+
+        mock_send_notifications.return_value = True
+
+        with patch('src.approval_handler.table', table):
+            res1 = lambda_handler(event, {})
+            res2 = lambda_handler(event, {})
+
+        assert res1['statusCode'] == 200
+        assert res2['statusCode'] == 200
+        rid1 = res1['body']['request_id']
+        rid2 = res2['body']['request_id']
+        assert rid1 == rid2
+        assert res1['body']['notification_sent'] is True
+        assert res2['body']['notification_sent'] is False
+        assert mock_send_notifications.call_count == 1
+
+        # Only one item stored
+        with patch('src.approval_handler.table', table):
+            scan = table.scan()
+        assert len(scan.get('Items', [])) == 1
 
     @mock_aws
     @patch('src.approval_handler.TABLE_NAME', 'test-table')

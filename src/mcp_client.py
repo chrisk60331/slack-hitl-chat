@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator
 
 import boto3
 from dotenv import load_dotenv
@@ -73,6 +73,7 @@ class MCPClient:
             env=None
         )
 
+        logger.info("mcp.connect.begin", extra={"command": command, "script": server_script_path})
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         self.stdio, self.write = stdio_transport
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
@@ -82,7 +83,8 @@ class MCPClient:
         # List available tools
         response = await self.session.list_tools()
         tools = response.tools
-        print("\nConnected to server with tools:", [tool.name for tool in tools])
+        tool_names = [tool.name for tool in tools]
+        logger.info("mcp.connect.done", extra={"tools": ",".join(tool_names)})
 
     async def process_query(self, query: str) -> str:
         """Process a query using Claude on Bedrock and available tools.
@@ -93,7 +95,7 @@ class MCPClient:
         Returns:
             The response from Claude after potentially calling tools
         """
-        print(f"Processing query: {query}")
+        logger.info("mcp.process_query", extra={"query_preview": query[:200]})
         messages = [
             {
                 "role": "user",
@@ -142,7 +144,7 @@ class MCPClient:
             
             # Check if there are any tool calls to process
             tool_calls = [content for content in assistant_content if content.get('type') == 'tool_use']
-            print(f"Assistant response contains {len(tool_calls)} tool calls: {tool_calls}")
+            logger.info("mcp.tool_calls", extra={"count": len(tool_calls)})
             
             if not tool_calls:
                 # No tool calls, extract and return the final response
@@ -164,7 +166,7 @@ class MCPClient:
                 tool_use_id = tool_content.get('id')
 
                 try:
-                    logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+                    logger.info("mcp.tool.execute", extra={"name": tool_name})
                     # Execute tool call
                     result = await self.session.call_tool(tool_name, tool_args)
                     
@@ -196,6 +198,211 @@ class MCPClient:
         
         # If we reach here, we hit max iterations
         return f"Task partially completed but reached maximum conversation iterations ({MAX_ITERATIONS}). The assistant may need simpler instructions or the task may be too complex for automated execution."
+
+    def stream_text(self, query: str) -> Iterator[str]:
+        """Stream tokens from Bedrock (Anthropic Messages) in real time.
+
+        This method uses invoke_model_with_response_stream to yield token deltas
+        from Claude. It does not perform MCP tool calls; it's intended for
+        lightweight, low-latency streaming to UIs (e.g., Slack SSE).
+
+        Args:
+            query: The natural language prompt to send to the model.
+
+        Yields:
+            Token text chunks (may be partial words).
+        """
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 2000,
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": query}]}
+            ],
+            "system": SYSTEM_PROMPT,
+        }
+
+        response = self.bedrock.invoke_model_with_response_stream(
+            modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            body=json.dumps(request_body)
+        )
+
+        # The streaming body yields events; `chunk` contains the JSON lines
+        stream = response.get('body')
+        if stream is None:
+            return
+        for event in stream:
+            chunk = event.get('chunk')
+            if not chunk:
+                continue
+            data = chunk.get('bytes')
+            if not data:
+                continue
+            try:
+                payload = json.loads(data.decode('utf-8'))
+            except Exception:
+                continue
+            # Anthropic streaming events: we care about contentBlockDelta for token text
+            if payload.get('type') == 'contentBlockDelta':
+                delta = payload.get('delta') or {}
+                text = delta.get('text')
+                if text:
+                    yield text
+
+    async def stream_conversation(self, query: str) -> AsyncIterator[Dict[str, Any]]:
+        """Stream a full conversation with tool use events and token deltas.
+
+        Yields structured events:
+          - {"type": "token", "text": str}
+          - {"type": "tool_call", "name": str, "args": dict}
+          - {"type": "tool_result", "name": str, "content": str}
+          - {"type": "final", "text": str}
+          - {"type": "error", "message": str}
+
+        This processes model turns in a loop. On each turn it streams text tokens
+        while also detecting tool_use blocks. After the turn completes, any
+        detected tool calls are executed via MCP and appended as tool_result
+        content to the next request messages, continuing until no more tools are
+        requested. Finally emits a "final" event.
+        """
+        import uuid
+
+        if self.session is None:
+            # If caller forgot to connect, provide a clear error
+            yield {"type": "error", "message": "MCP session not initialized"}
+            return
+
+        # Discover tools from MCP server
+        tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
+        available_tools = [
+            {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+            for t in tools_resp.tools
+        ]
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "user", "content": [{"type": "text", "text": query}]}
+        ]
+
+        # Loop until no more tool calls
+        for _iter in range(MAX_ITERATIONS):
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 2000,
+                "messages": messages,
+                "tools": available_tools,
+                "system": SYSTEM_PROMPT,
+            }
+
+            # State for this streamed message
+            assistant_text_parts: List[str] = []
+            pending_tool_calls: List[Dict[str, Any]] = []
+            current_block_type: Optional[str] = None
+            current_tool_name: Optional[str] = None
+            current_tool_id: Optional[str] = None
+            tool_input_buffer: List[str] = []
+
+            response = self.bedrock.invoke_model_with_response_stream(
+                modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                body=json.dumps(request_body),
+            )
+            stream = response.get("body")
+            if stream is None:
+                yield {"type": "error", "message": "no stream body"}
+                break
+
+            for event in stream:
+                chunk = event.get("chunk")
+                if not chunk:
+                    continue
+                data = chunk.get("bytes")
+                if not data:
+                    continue
+                try:
+                    payload = json.loads(data.decode("utf-8"))
+                except Exception:
+                    continue
+
+                ptype = payload.get("type")
+                if ptype == "contentBlockStart":
+                    block = payload.get("contentBlock", {})
+                    current_block_type = block.get("type")
+                    if current_block_type == "tool_use":
+                        current_tool_name = block.get("name")
+                        current_tool_id = block.get("id") or f"tool-{uuid.uuid4().hex[:8]}"
+                        tool_input_buffer = []
+                elif ptype == "contentBlockDelta":
+                    delta = payload.get("delta", {})
+                    # Text streaming
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        if text:
+                            assistant_text_parts.append(text)
+                            yield {"type": "token", "text": text}
+                    # Tool input JSON streaming
+                    if delta.get("type") == "input_json_delta":
+                        partial = delta.get("partial_json", "")
+                        if partial:
+                            tool_input_buffer.append(partial)
+                elif ptype == "contentBlockStop":
+                    if current_block_type == "tool_use":
+                        # Finalize tool input JSON
+                        args_json = ("".join(tool_input_buffer) or "{}").strip()
+                        try:
+                            tool_args = json.loads(args_json)
+                        except Exception:
+                            tool_args = {"_raw": args_json}
+                        if current_tool_name:
+                            pending_tool_calls.append(
+                                {
+                                    "name": current_tool_name,
+                                    "id": current_tool_id,
+                                    "args": tool_args,
+                                }
+                            )
+                    current_block_type = None
+                    current_tool_name = None
+                    current_tool_id = None
+                    tool_input_buffer = []
+                elif ptype == "messageStop":
+                    # End of this assistant turn
+                    break
+
+            # If there are tool calls, execute them and continue loop
+            if pending_tool_calls:
+                tool_results_content: List[Dict[str, Any]] = []
+                for call in pending_tool_calls:
+                    yield {"type": "tool_call", "name": call["name"], "args": call["args"]}
+                    try:
+                        # Execute via MCP
+                        result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
+                        content_str = str(result.content)
+                        yield {"type": "tool_result", "name": call["name"], "content": content_str}
+                        tool_results_content.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": call.get("id") or "",
+                                "content": content_str,
+                            }
+                        )
+                    except Exception as e:  # pragma: no cover - defensive
+                        err = f"Error executing tool {call['name']}: {e}"
+                        yield {"type": "tool_result", "name": call["name"], "content": err, "is_error": True}
+                        tool_results_content.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": call.get("id") or "",
+                                "content": err,
+                                "is_error": True,
+                            }
+                        )
+
+                # Add tool results as a user message and continue
+                messages.append({"role": "user", "content": tool_results_content})
+                continue
+
+            # No tools requested; finalize
+            final_text = "".join(assistant_text_parts).strip()
+            yield {"type": "final", "text": final_text}
+            break
 
     async def chat_loop(self) -> None:
         """Run an interactive chat loop."""

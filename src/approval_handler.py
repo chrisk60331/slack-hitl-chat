@@ -8,8 +8,10 @@ notifications to Slack or Microsoft Teams.
 import json
 import os
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+import base64
 
 import boto3
 import requests
@@ -27,6 +29,9 @@ class ApprovalItem(BaseModel):
     reason: str = ""
     approval_status: str = "pending"
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Optional Slack thread metadata for completion updates
+    slack_channel: str = ""
+    slack_ts: str = ""
 
     def to_dynamodb_item(self) -> Dict[str, Any]:
         """Convert to DynamoDB item format."""
@@ -36,6 +41,23 @@ class ApprovalItem(BaseModel):
     def from_dynamodb_item(cls, item: Dict[str, Any]) -> 'ApprovalItem':
         """Create from DynamoDB item."""
         return cls(**item)
+
+
+def compute_request_id_from_action(action_text: str) -> str:
+    """Compute a deterministic request_id from the proposed action text.
+
+    Uses SHA-256 over the raw UTF-8 bytes of the provided action text and
+    returns the hex digest. This ensures identical action texts map to the
+    same request_id so we can de-duplicate approval requests.
+
+    Args:
+        action_text: The proposed action text to hash.
+
+    Returns:
+        Hex-encoded SHA-256 digest string.
+    """
+    digest = hashlib.sha256(action_text.encode("utf-8")).hexdigest()
+    return digest
 
 
 class ApprovalDecision(BaseModel):
@@ -82,15 +104,11 @@ def get_lambda_function_url() -> str:
     Returns:
         The Lambda function URL or empty string if not available
     """
-    try:
-        lambda_client = boto3.client('lambda', region_name=os.environ['AWS_REGION'])
-        function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
+    lambda_client = boto3.client('lambda', region_name=os.environ['AWS_REGION'])
+    function_name = os.environ.get('APPROVAL_LAMBDA_FUNCTION_NAME', '')
 
-        response = lambda_client.get_function_url_config(FunctionName=function_name)
-        return response.get('FunctionUrl', '')
-    except Exception:
-        return ''
-
+    response = lambda_client.get_function_url_config(FunctionName=function_name)
+    return response.get('FunctionUrl', '')
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -104,15 +122,34 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response dictionary with status and data
     """
+    import urllib
+    import base64
+    import json
     print(f"Approval handler received event: {event}")
     try:
         # Handle approval decision (POST with approval data)
         # Opportunistic validation to surface parsing errors early (helps tests and debugging)
         body = event.get('body')
+        if event.get("isBase64Encoded"):
+            event['body'] = {}
+            event['body']['request_id'] = list({
+                json.loads(g.get('value')).get('request_id') 
+                for  g in [
+                    f.get('elements') 
+                    for f in json.loads(
+                        urllib.parse.unquote(base64.b64decode(body)).replace("payload=","")
+                    ).get('message').get('blocks') 
+                    if f.get("elements")
+                ][0]
+            })[0]
+            event['body']['action'] = json.loads(urllib.parse.unquote(
+                base64.b64decode(body)
+            ).replace("payload=",""))['actions'][0]['action_id']
+            print(f"transformed event {event}")
         if body is not None:
             try:
                 # This will raise if body is invalid JSON when provided as a string
-                _ = _extract_decision_data({'body': body})
+                _ = _extract_decision_data({'body': event})
             except Exception:
                 # Re-raise to be handled by the generic error block below
                 raise
@@ -134,6 +171,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'error': 'operation failed',
             'details': str(e)
         }
+        print(f"error_response {error_response}")
         return {
             'statusCode': 500,
             'body': json.dumps(error_response)
@@ -220,6 +258,7 @@ def _extract_request_id_for_status_check(event: Dict[str, Any]) -> str:
 def _handle_approval_decision(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle approval decision requests."""
     # Extract decision data from event
+    print(f"_handle_approval_decision event {event}")
     decision_data = _extract_decision_data(event)
     decision = ApprovalDecision(**decision_data)
     
@@ -329,14 +368,45 @@ def _handle_new_approval_request(event: Dict[str, Any]) -> Dict[str, Any]:
     # Create new approval request
     if 'Input' in event:
         event = event['Input']
+    print(f"_handle_new_approval_request event {event}")
+    proposed_action_text = event.get('proposed_action', '') or ''
+    # Compute deterministic request_id from action text
+    deterministic_request_id = compute_request_id_from_action(proposed_action_text)
+
+    # If an item with this request_id already exists, return it (de-dup)
+    try:
+        existing = table.get_item(Key={'request_id': deterministic_request_id}).get('Item')
+    except Exception:
+        existing = None
+
+    if existing:
+        existing_item = ApprovalItem.from_dynamodb_item(existing)
+        response_data = {
+            'request_id': existing_item.request_id,
+            'status': existing_item.approval_status,
+            'timestamp': existing_item.timestamp,
+            'notification_sent': False,
+            'proposed_action': existing_item.proposed_action
+        }
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': response_data
+        }
 
     approval_item = ApprovalItem(
+        request_id=deterministic_request_id,
         requester=event.get('requester', ''),
         approver=event.get('approver', ''),
         agent_prompt=event.get('agent_prompt', ''),
-        proposed_action=event.get('proposed_action', ''),
+        proposed_action=proposed_action_text,
         reason=event.get('reason', ''),
-        approval_status=event.get('approval_status', 'pending')
+        approval_status=event.get('approval_status', 'pending'),
+        slack_channel=event.get('slack_channel', ''),
+        slack_ts=event.get('slack_ts', ''),
     )
     
     action = approval_item.approval_status
@@ -399,7 +469,7 @@ def send_notifications(
         True if any notification was sent successfully
     """
     notification_sent = False
-    
+    proposed_action = proposed_action.replace("<@U099WCH3GM9>","").strip()
     # Prepare message content
     if action == "pending":
         status_emoji = "⏳"
@@ -413,8 +483,8 @@ def send_notifications(
         status_emoji = "❌"
         action_text = "Rejected"
         status = "❌ Rejected"
-    approval_link = f"{get_lambda_function_url()}?request_id={request_id}&action=approve&approver=admin"
-    rejection_link = f"{get_lambda_function_url()}?request_id={request_id}&action=reject&approver=admin"
+    approval_link = f"{get_lambda_function_url()}?request_id={request_id}&action=approve&approver=admin|"
+    rejection_link = f"{get_lambda_function_url()}?request_id={request_id}&action=reject&approver=admin|"
     message_content = {
         'title': f"AgentCore HITL {action_text}",
         'request_id': request_id,
@@ -485,7 +555,7 @@ Agent Prompt:
 {content['agent_prompt']}
 
 Proposed Action:
-{content['proposed_action']}
+{content['proposed_action'].replace("@AgentCore","").strip()}
 
 Reason:
 {content['reason']}"""
@@ -493,14 +563,14 @@ Reason:
     # Add approval links only for pending requests
     function_url = get_lambda_function_url()
     if content.get('status') == 'pending' and function_url:
-        approval_link = f"{function_url}?request_id={content['request_id']}&action=approve&approver=admin"
-        rejection_link = f"{function_url}?request_id={content['request_id']}&action=reject&approver=admin"
+        approval_link = f"{function_url}?request_id={content['request_id']}&action=approve|"
+        rejection_link = f"{function_url}?request_id={content['request_id']}&action=reject|"
         
         base_message += f"""
 
-🔗 APPROVAL ACTIONS:
-✅ Approve: {approval_link}
-❌ Reject: {rejection_link}
+APPROVAL ACTIONS:
+Approve: {approval_link}
+Reject: {rejection_link}
 
 Note: Click the links above to approve or reject this request."""
 
@@ -508,20 +578,43 @@ Note: Click the links above to approve or reject this request."""
 
 
 def send_slack_notification(content: Dict[str, str]) -> bool:
-    """Deprecated: use slack_helper.post_slack_webhook_message instead.
+    """Post a simple Slack webhook message for approval notifications.
 
-    This function remains for backward-compatibility with existing tests and
-    will delegate to the helper module. Once external callers have migrated,
-    this can be removed.
+    Kept for backward-compatibility with tests. Builds text inline and posts
+    via requests within this module to allow straightforward patching in tests.
     """
-    try:
-        from .slack_helper import post_slack_webhook_message
-
-        return post_slack_webhook_message(
-            content, function_url_getter=get_lambda_function_url
-        )
-    except Exception:
+    webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
+    if not webhook_url:
         return False
+
+    # Build text in the same style as slack_helper._build_slack_text
+    lines = [
+        f"*{content.get('title', 'AgentCore Notification')}*",
+        f"*Request ID*: {content.get('request_id', '')}",
+        f"*Status*: {content.get('status', '')}",
+        f"*Requester*: {content.get('requester', '')}",
+        "",
+        "*Agent Prompt:*",
+        content.get("agent_prompt", ""),
+        "",
+        "*Proposed Action:*",
+        content.get("proposed_action", ""),
+    ]
+    reason = content.get("reason")
+    if reason:
+        lines.extend(["", "*Reason:*", reason])
+
+    if content.get('status') == 'pending':
+        function_url = get_lambda_function_url()
+        if function_url:
+            rid = content.get('request_id', '')
+            approve_link = f"{function_url}?request_id={rid}&action=approve"
+            reject_link = f"{function_url}?request_id={rid}&action=reject"
+            lines.extend(["", "*Approval Actions:*", f"Approve: {approve_link}", f"Reject: {reject_link}"])
+
+    payload = {"text": "\n".join(lines)}
+    resp = requests.post(webhook_url, json=payload, timeout=5)
+    return resp.status_code == 200 and resp.text.strip().lower() in {"ok", ""}
 
 
 def get_approval_status(request_id: str) -> Optional[ApprovalItem]:

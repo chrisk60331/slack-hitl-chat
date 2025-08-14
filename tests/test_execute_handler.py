@@ -60,6 +60,7 @@ class TestExecuteHandler:
         assert error_result.execution_status == "failed"
         assert error_result.error_message == "Tool not found"
     
+    @pytest.mark.asyncio
     @patch.dict('os.environ', {
         'MCP_AUTH_TOKEN': 'test-token',
         'AWS_REGION': 'us-east-1',
@@ -77,11 +78,13 @@ class TestExecuteHandler:
             mock_model.assert_called_once()
             mock_agent.assert_called_once()
     
+    @pytest.mark.asyncio
     async def test_create_ai_agent_missing_token(self) -> None:
         """Test AI agent creation with missing MCP token."""
         with pytest.raises(ValueError, match="MCP_AUTH_TOKEN environment variable is required"):
             await create_ai_agent()
     
+    @pytest.mark.asyncio
     @patch.dict('os.environ', {'MCP_AUTH_TOKEN': 'test-token'})
     async def test_create_ai_agent_with_defaults(self) -> None:
         """Test AI agent creation with default AWS region and Bedrock model."""
@@ -96,6 +99,7 @@ class TestExecuteHandler:
                 provider='bedrock'
             )
     
+    @pytest.mark.asyncio
     async def test_execute_mcp_action_success(self) -> None:
         """Test successful MCP action execution."""
         mock_agent = AsyncMock()
@@ -108,6 +112,7 @@ class TestExecuteHandler:
         assert result == {"message": "User created successfully"}
         mock_agent.run.assert_called_once_with("Create user test@example.com")
     
+    @pytest.mark.asyncio
     async def test_execute_mcp_action_failure(self) -> None:
         """Test MCP action execution failure."""
         mock_agent = AsyncMock()
@@ -116,6 +121,7 @@ class TestExecuteHandler:
         with pytest.raises(Exception, match="AI agent error"):
             await execute_mcp_action(mock_agent, "Invalid action")
     
+    @pytest.mark.asyncio
     @patch('src.execute_handler.execute_mcp_action')
     @patch('src.execute_handler.create_ai_agent')
     async def test_execute_action_from_text_success(
@@ -138,6 +144,7 @@ class TestExecuteHandler:
         mock_create_agent.assert_called_once()
         mock_execute_action.assert_called_once_with(mock_agent, "Create user test@example.com")
     
+    @pytest.mark.asyncio
     @patch('src.execute_handler.asyncio.wait_for')
     @patch('src.execute_handler.create_ai_agent')
     async def test_execute_action_from_text_timeout(
@@ -293,6 +300,7 @@ class TestExecuteHandler:
         assert response["statusCode"] == 500
         assert "Either action_text or request_id must be provided" in response["body"]["details"]
 
+    @pytest.mark.asyncio
     @patch.dict('os.environ', {'MCP_AUTH_TOKEN': 'test-token'})
     async def test_create_ai_agent_runtime_error(self) -> None:
         """Test AI agent creation with runtime error."""

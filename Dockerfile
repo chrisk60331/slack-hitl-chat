@@ -9,7 +9,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # Set work directory
 WORKDIR ${LAMBDA_TASK_ROOT}
 
-RUN yum update -y && yum install -y gcc
+RUN yum update -y && yum install -y gcc unzip curl
 # Copy pyproject.toml first for better caching
 COPY pyproject.toml README.md ./
 
@@ -31,3 +31,22 @@ FROM base AS execute
 COPY .env ./
 COPY google_mcp/ ./google_mcp/
 CMD ["src.execute_handler.lambda_handler"] 
+
+# Slack handler Lambda target
+FROM base AS slack
+COPY .env ./
+COPY google_mcp/ ./google_mcp/
+CMD ["src.slack_lambda.lambda_handler"]
+
+# Completion notifier Lambda target
+FROM base AS completion
+CMD ["src.completion_notifier.lambda_handler"]
+
+# FastAPI API (Lambda Web Adapter)
+FROM base AS api
+# For Lambda, use Mangum handler; no need for web adapter
+ENV PORT=8080
+WORKDIR "/var/task"
+COPY .env ./
+COPY google_mcp/ ./google_mcp/
+CMD ["src.api.handler"]

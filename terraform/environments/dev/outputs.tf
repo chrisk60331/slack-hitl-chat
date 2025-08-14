@@ -1,3 +1,17 @@
+output "slack_api_url" {
+  description = "Invoke URL for Slack API Gateway"
+  value       = aws_apigatewayv2_api.slack.api_endpoint
+}
+
+output "slack_sessions_table_name" {
+  description = "Slack sessions DynamoDB table name"
+  value       = module.dynamodb.slack_sessions_table_name
+}
+
+output "agentcore_api_url" {
+  description = "Invoke URL for AgentCore FastAPI (Lambda Web Adapter)"
+  value       = aws_apigatewayv2_api.agentcore_api.api_endpoint
+}
 # VPC Outputs
 output "vpc_id" {
   description = "ID of the VPC"

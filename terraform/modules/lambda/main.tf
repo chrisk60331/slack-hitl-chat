@@ -96,15 +96,19 @@ resource "docker_image" "lambda" {
 resource "docker_registry_image" "lambda" {
   name = docker_image.lambda.name
 
+  keep_remotely = true
+
+  # lifecycle {
+  #   create_before_destroy = true
+  # }
+
   depends_on = [
     aws_ecr_repository.lambda,
     docker_image.lambda
   ]
 
   triggers = {
-    dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
-    pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
-    src_sha        = filesha256(data.archive_file.src.output_path)
+    docker_image_sha = docker_image.lambda.image_id
   }
 }
 

@@ -165,9 +165,21 @@ variable "mcp_port" {
   default     = "8000"
 }
 
-variable "openai_api_key" {
-  description = "OpenAI API key for GPT models"
+# Slack configuration
+variable "slack_secrets_name" {
+  type        = string
+  default     = ""
+}
+
+variable "slack_bot_token" {
+  description = "Slack bot token for notifications"
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "slack_channel_id" {
+  description = "Slack channel ID for notifications"
+  type        = string
+  default     = ""
 }

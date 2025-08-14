@@ -94,3 +94,33 @@ resource "aws_dynamodb_table" "agentcore_state_machine" {
     Purpose = "Step Functions execution tracking"
   })
 } 
+
+# DynamoDB Table for Slack Sessions mapping (channel:thread -> session_id)
+resource "aws_dynamodb_table" "slack_sessions" {
+  name         = "${var.name_prefix}-slack-sessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "thread_key"
+
+  attribute {
+    name = "thread_key"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = merge(var.tags, {
+    Name    = "${var.name_prefix}-slack-sessions"
+    Purpose = "Slack thread to AgentCore session mapping"
+  })
+}

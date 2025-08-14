@@ -60,7 +60,7 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
           {
             Variable      = "$.body.status"
             StringEquals  = "failed"
-            Next          = "ApprovalFailed"
+            Next          = "NotifyCompletion"
           }
         ]
         Default = "WaitForApproval"
@@ -79,6 +79,16 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         }
         Next = "ExecuteApprovedAction"
       }
+      ApprovalRejected = {
+        Type   = "Pass"
+        Parameters = {
+          "status" = "rejected"
+          "message" = "Request has not been approved"
+          "request_id.$" = "$.body.request_id"
+          "execute_result" = "Request Rejected by Human."
+        }
+        Next = "NotifyCompletion"
+      }
       ExecuteApprovedAction = {
         Type     = "Task"
         Resource = var.execute_lambda_function_arn
@@ -86,6 +96,7 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
           "request_id.$" = "$.request_id"
           "execution_timeout" = 300
         }
+        ResultPath = "$.execute_result"
         Retry = [
           {
             ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"]
@@ -104,6 +115,29 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
             Next        = "ExecutionFailed"
           }
         ]
+        Next = "NotifyCompletion"
+      }
+      NotifyCompletion = {
+        Type     = "Task"
+        Resource = var.completion_lambda_function_arn
+        Parameters = {
+          "request_id.$" = "$.request_id"
+          "result.$"     = "$.execute_result"
+        }
+        Retry = [
+          {
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"]
+            IntervalSeconds = 2
+            MaxAttempts     = 3
+            BackoffRate     = 2
+          }
+        ]
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            Next        = "ExecutionComplete"
+          }
+        ]
         Next = "ExecutionComplete"
       }
       ExecutionComplete = {
@@ -119,14 +153,6 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         Result = {
           status  = "execution_failed"
           message = "Request was approved but execution failed"
-        }
-        End = true
-      }
-      ApprovalRejected = {
-        Type   = "Pass"
-        Result = {
-          status  = "rejected"
-          message = "Request has been rejected"
         }
         End = true
       }
@@ -195,3 +221,12 @@ resource "aws_lambda_permission" "step_functions_execute_lambda" {
   principal     = "states.amazonaws.com"
   source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
 } 
+
+# Lambda permission for Step Functions (completion notifier)
+resource "aws_lambda_permission" "step_functions_completion_lambda" {
+  statement_id  = "AllowExecutionFromStepFunctionsCompletion"
+  action        = "lambda:InvokeFunction"
+  function_name = var.completion_lambda_function_arn
+  principal     = "states.amazonaws.com"
+  source_arn    = aws_sfn_state_machine.agentcore_hitl_workflow.arn
+}

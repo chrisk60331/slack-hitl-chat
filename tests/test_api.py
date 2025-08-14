@@ -17,7 +17,8 @@ def _sign_slack_request(signing_secret: str, body: bytes, timestamp: str) -> str
 
 @pytest.mark.asyncio
 async def test_healthz() -> None:
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get("/healthz")
         assert resp.status_code == 200
         data = resp.json()

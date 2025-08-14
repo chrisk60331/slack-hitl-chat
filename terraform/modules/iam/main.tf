@@ -33,6 +33,11 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_secrets_execution" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+}
+
 # ECR Access Policy for Lambda (to pull Docker images)
 resource "aws_iam_policy" "lambda_ecr_policy" {
   name        = "${var.name_prefix}-lambda-ecr-policy"
@@ -87,6 +92,23 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
 resource "aws_iam_role_policy_attachment" "lambda_dynamodb_policy_attachment" {
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
+}
+
+# Allow API Gateway to invoke Slack Lambda
+resource "aws_iam_policy" "apigw_invoke_lambda" {
+  name        = "${var.name_prefix}-apigw-invoke-lambda"
+  description = "Allow API Gateway to invoke Lambda functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # SNS and SES Policy for Lambda (for notifications)
@@ -309,6 +331,12 @@ resource "aws_iam_policy" "agentcore_stepfunctions_policy" {
 
 resource "aws_iam_role_policy_attachment" "agentcore_stepfunctions_policy_attachment" {
   role       = aws_iam_role.agentcore_app_role.name
+  policy_arn = aws_iam_policy.agentcore_stepfunctions_policy.arn
+}
+
+
+resource "aws_iam_role_policy_attachment" "lambda_execution_role" {
+  role       = aws_iam_role.lambda_execution_role.name
   policy_arn = aws_iam_policy.agentcore_stepfunctions_policy.arn
 }
 

@@ -10,7 +10,7 @@ This project implements a multi-environment, DRY (Don't Repeat Yourself) infrast
 
 - **Lambda Functions**: Docker-based functions for approval processing
 - **Step Functions**: Orchestrate human-in-the-loop workflows
-- **DynamoDB**: Store approval logs and state machine data
+- **DynamoDB**: Store approval logs, state machine data, and Slack session mappings
 - **SNS**: Notifications and messaging
 - **EventBridge**: Event-driven workflow triggers
 - **VPC**: Network isolation and security
@@ -86,7 +86,50 @@ terraform/scripts/deploy.sh dev plan
 
 # Apply development deployment
 terraform/scripts/deploy.sh dev apply
+## 🤖 Slack App Integration
+
+This repo includes a Slack App integration that connects Slack conversations to the AgentCore Gateway.
+
+Features:
+- OAuth v2 install flow; bot token stored in AWS Secrets Manager
+- Events API handler via API Gateway → Lambda
+- Thread persistence by mapping `channel:thread_ts` to `session_id` in DynamoDB
+- Incremental streaming back to Slack using message updates
+ - Supports `message.*` events and `app_mention` (mention text is cleaned of the `<@bot>` prefix)
+
+Reliability and retries:
+- The Events handler now acks within 3 seconds and processes the AgentCore stream asynchronously (set `SLACK_ASYNC=1` in the Slack Lambda env to force async; defaults to auto-enable in Lambda).
+- Basic deduplication prevents double-posts if Slack retries the same `event_id`.
+- If the AgentCore Gateway returns a transient 404 for the stream cursor, the handler will automatically create a new message cursor and retry once before surfacing an error.
+
+Setup steps:
+1. Create a Slack app at `api.slack.com/apps`.
+2. In OAuth & Permissions, set a Redirect URL to your API Gateway URL `/oauth/callback`.
+3. In Event Subscriptions, set the Request URL to `/events` and subscribe to `message.channels` (and others as needed).
+4. Put `client_id`, `client_secret`, and `signing_secret` into Secrets Manager (e.g., `agentcore-dev/slack`).
+5. Apply Terraform. Set env vars for the Slack Lambda:
+   - `SLACK_SESSIONS_TABLE` = output `slack_sessions_table_name`
+   - `SLACK_SECRETS_NAME` = your secret name
+   - `AGENTCORE_GATEWAY_URL` = your AgentCore invoke endpoint
+    - `SLACK_ASYNC` = `1` to force async processing (recommended for Lambda)
+   - Optional: `SLACK_BOT_TOKEN` environment variable can be used as a fallback if Secrets Manager does not contain `bot_token`
+
+The Lambda exchanges OAuth codes, stores the bot token in the same secret, and handles Events (including `app_mention`), invoking the AgentCore Gateway and streaming responses back to Slack. On receipt of an event, it posts an immediate placeholder message to the channel/thread before streaming updates, which helps confirm invocation.
+
 ```
+
+### Lambda FastAPI Handler
+
+For the API Lambda, the Docker `api` target uses Mangum. The handler is `src.api.handler` and the base image is `public.ecr.aws/lambda/python:3.11`. You can run locally with RIE:
+
+```bash
+docker build --target api -t agentcore-api .
+docker run --rm -p 9000:8080 agentcore-api src.api.handler
+# invoke locally
+curl -s -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{"rawPath":"/healthz","requestContext":{}}'
+```
+
+When deploying via Terraform, the function package type is Image and the runtime will invoke `src.api.handler` automatically.
 
 ### 3. Deploy to Other Environments
 

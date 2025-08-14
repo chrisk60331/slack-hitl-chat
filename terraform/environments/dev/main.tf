@@ -108,6 +108,9 @@ module "approval_lambda" {
     TABLE_NAME         = module.dynamodb.approval_log_table_name
     SLACK_WEBHOOK_URL  = var.slack_webhook_url
     TEAMS_WEBHOOK_URL  = var.teams_webhook_url
+    APPROVAL_LAMBDA_FUNCTION_NAME =  "${local.name_prefix}_approval"
+    SLACK_BOT_TOKEN = var.slack_bot_token
+    SLACK_CHANNEL_ID = var.slack_channel_id
   }
 }
 
@@ -136,9 +139,203 @@ module "execute_lambda" {
     MCP_AUTH_TOKEN      = var.mcp_auth_token
     MCP_HOST           = var.mcp_host
     MCP_PORT           = var.mcp_port
-    OPENAI_API_KEY     = var.openai_api_key
     LOG_LEVEL          = "INFO"
+    SLACK_WEBHOOK_URL  = var.slack_webhook_url
+    APPROVAL_LAMBDA_FUNCTION_NAME = module.approval_lambda.lambda_function_name
+    SLACK_BOT_TOKEN = var.slack_bot_token
+    SLACK_CHANNEL_ID = var.slack_channel_id
   }
+}
+
+# Completion Notifier Lambda Module
+module "completion_lambda" {
+  source = "../../modules/lambda"
+
+  name_prefix               = local.name_prefix
+  function_name             = "completion"
+  source_path               = "${path.module}/../../../"
+  docker_target             = "completion"
+  handler_file              = "src/completion_notifier.py"
+  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
+  lambda_timeout            = 60
+  lambda_memory_size        = 256
+  private_subnet_ids        = module.networking.private_subnet_ids
+  lambda_security_group_id  = module.networking.lambda_security_group_id
+  create_function_url       = false
+  create_sns_topic          = false
+  tags                      = local.common_tags
+
+  environment_variables = {
+    TABLE_NAME        = module.dynamodb.approval_log_table_name
+    SLACK_BOT_TOKEN   = var.slack_bot_token
+    SLACK_CHANNEL_ID  = var.slack_channel_id
+  }
+}
+
+# Slack Lambda for OAuth and Events
+module "slack_lambda" {
+  source = "../../modules/lambda"
+
+  name_prefix               = local.name_prefix
+  function_name             = "slack"
+  source_path               = "${path.module}/../../../"
+  docker_target             = "slack"
+  handler_file              = "src/slack_lambda.py"
+  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
+  lambda_timeout            = 600
+  lambda_memory_size        = 256
+  private_subnet_ids        = module.networking.private_subnet_ids
+  lambda_security_group_id  = module.networking.lambda_security_group_id
+  create_function_url       = false
+  create_sns_topic          = false
+  tags                      = local.common_tags
+
+  environment_variables = {
+    TABLE_NAME          = module.dynamodb.approval_log_table_name
+    SLACK_SESSIONS_TABLE = module.dynamodb.slack_sessions_table_name
+    SLACK_SECRETS_NAME   = var.slack_secrets_name != "" ? var.slack_secrets_name : "agentcore-${var.environment}/slack"
+    AGENTCORE_GATEWAY_URL = aws_apigatewayv2_api.agentcore_api.api_endpoint
+    SLACK_WEBHOOK_URL  = var.slack_webhook_url
+    APPROVAL_LAMBDA_FUNCTION_NAME = module.approval_lambda.lambda_function_name
+    SLACK_BOT_TOKEN = var.slack_bot_token
+    SLACK_CHANNEL_ID = var.slack_channel_id
+    STATE_MACHINE_ARN = module.stepfunctions.step_functions_arn
+  }
+}
+
+# API Lambda (FastAPI with Lambda Web Adapter)
+module "api_lambda" {
+  source = "../../modules/lambda"
+
+  name_prefix               = local.name_prefix
+  function_name             = "api"
+  source_path               = "${path.module}/../../../"
+  docker_target             = "api"
+  handler_file              = "src/api.py"
+  lambda_execution_role_arn = module.iam.lambda_execution_role_arn
+  lambda_timeout            = 600
+  lambda_memory_size        = 1024
+  private_subnet_ids        = module.networking.private_subnet_ids
+  lambda_security_group_id  = module.networking.lambda_security_group_id
+  create_function_url       = false
+  create_sns_topic          = false
+  tags                      = local.common_tags
+  
+  environment_variables = {
+    TABLE_NAME = module.dynamodb.approval_log_table_name
+    SLACK_WEBHOOK_URL  = var.slack_webhook_url
+    APPROVAL_LAMBDA_FUNCTION_NAME = module.approval_lambda.lambda_function_name
+    SLACK_BOT_TOKEN = var.slack_bot_token
+    SLACK_CHANNEL_ID = var.slack_channel_id
+  }
+}
+
+resource "aws_apigatewayv2_api" "agentcore_api" {
+  name          = "${local.name_prefix}-agentcore-api"
+  protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_integration" "api_sessions" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "api_messages" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "api_stream" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "GET"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "api_sessions" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "POST /gateway/v1/sessions"
+  target    = "integrations/${aws_apigatewayv2_integration.api_sessions.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_messages" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "POST /gateway/v1/sessions/{session_id}/messages"
+  target    = "integrations/${aws_apigatewayv2_integration.api_messages.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_stream" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /gateway/v1/sessions/{session_id}/stream"
+  target    = "integrations/${aws_apigatewayv2_integration.api_stream.id}"
+}
+
+resource "aws_lambda_permission" "apigw_invoke_api" {
+  statement_id  = "AllowAPIGwInvokeAPI"
+  action        = "lambda:InvokeFunction"
+  function_name = module.api_lambda.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.agentcore_api.execution_arn}/*/*"
+}
+
+resource "aws_apigatewayv2_stage" "agentcore_api" {
+  api_id      = aws_apigatewayv2_api.agentcore_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_apigatewayv2_api" "slack" {
+  name          = "${local.name_prefix}-slack-api"
+  protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_integration" "slack_events" {
+  api_id                 = aws_apigatewayv2_api.slack.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.slack_lambda.lambda_function_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "slack_events" {
+  api_id    = aws_apigatewayv2_api.slack.id
+  route_key = "POST /events"
+  target    = "integrations/${aws_apigatewayv2_integration.slack_events.id}"
+}
+
+resource "aws_lambda_permission" "apigw_invoke_slack" {
+  statement_id  = "AllowAPIGwInvokeSlack"
+  action        = "lambda:InvokeFunction"
+  function_name = module.slack_lambda.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.slack.execution_arn}/*/*"
+}
+
+resource "aws_apigatewayv2_integration" "slack_oauth" {
+  api_id                 = aws_apigatewayv2_api.slack.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.slack_lambda.lambda_function_arn
+  integration_method     = "GET"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "slack_oauth" {
+  api_id    = aws_apigatewayv2_api.slack.id
+  route_key = "GET /oauth/callback"
+  target    = "integrations/${aws_apigatewayv2_integration.slack_oauth.id}"
+}
+
+resource "aws_apigatewayv2_stage" "slack" {
+  api_id      = aws_apigatewayv2_api.slack.id
+  name        = "$default"
+  auto_deploy = true
 }
 
 # Step Functions Module
@@ -153,4 +350,5 @@ module "stepfunctions" {
   stepfunctions_timeout             = var.stepfunctions_timeout
   tags                              = local.common_tags
   execute_lambda_function_arn       = module.execute_lambda.lambda_function_arn
+  completion_lambda_function_arn    = module.completion_lambda.lambda_function_arn
 } 
