@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator
+from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator, Tuple
 
 import boto3
 from dotenv import load_dotenv
@@ -51,6 +51,9 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.bedrock = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
+        # Multi-server support
+        self.sessions: Dict[str, ClientSession] = {}
+        self.tool_registry: Dict[str, Tuple[str, str]] = {}
 
     async def connect_to_server(self, server_script_path: str) -> None:
         """Connect to an MCP server.
@@ -86,6 +89,36 @@ class MCPClient:
         tool_names = [tool.name for tool in tools]
         logger.info("mcp.connect.done", extra={"tools": ",".join(tool_names)})
 
+    async def connect_to_servers(self, alias_to_path: Dict[str, str]) -> None:
+        """Connect to multiple MCP servers and build a qualified tool registry.
+
+        Args:
+            alias_to_path: Mapping from alias (e.g., "google", "jira") to server script path
+        """
+        print(f"alias_to_path {alias_to_path}")
+        alias, server_script_path = alias_to_path.split(":")
+        print(f"alias {alias} server_script_path {server_script_path}")
+        server_script_path = os.path.expanduser(server_script_path)
+        is_python = server_script_path.endswith('.py')
+        is_js = server_script_path.endswith('.js')
+        if not (is_python or is_js):
+            raise ValueError(f"Server script must be a .py or .js file for alias {alias}")
+
+        command = "python" if is_python else "node"
+        server_params = StdioServerParameters(command=command, args=[server_script_path], env=None)
+        logger.info("mcp.connect.begin", extra={"alias": alias, "command": command, "script": server_script_path})
+        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        stdio, write = stdio_transport
+        session = await self.exit_stack.enter_async_context(ClientSession(stdio, write))
+        await session.initialize()
+        self.sessions[alias] = session
+
+        response = await session.list_tools()
+        for tool in response.tools:
+            qualified_name = f"{alias}__{tool.name}"
+            self.tool_registry[qualified_name] = (alias, tool.name)
+        logger.info("mcp.connect.done", extra={"alias": alias, "tool_count": len(response.tools)})
+
     async def process_query(self, query: str) -> str:
         """Process a query using Claude on Bedrock and available tools.
         
@@ -96,6 +129,15 @@ class MCPClient:
             The response from Claude after potentially calling tools
         """
         logger.info("mcp.process_query", extra={"query_preview": query[:200]})
+        # Auto-connect to multiple servers if configured and none connected
+        if self.session is None and not self.sessions:
+            servers_env = os.getenv("MCP_SERVERS", "").strip()
+            print(f"servers_env {servers_env}")
+            if servers_env:
+                alias_to_path: Dict[str, str] = {}
+                for part in servers_env.split(";"):
+                    if part:
+                        await self.connect_to_servers(part)
         messages = [
             {
                 "role": "user",
@@ -103,12 +145,29 @@ class MCPClient:
             }
         ]
 
-        response = await self.session.list_tools()
-        available_tools = [{
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
+        # Discover tools from either single session or multi-sessions
+        available_tools: List[Dict[str, Any]] = []
+        if self.sessions:
+            for qualified, (_alias, _tname) in self.tool_registry.items():
+                # We cannot fetch input schema here without another call; rely on list_tools per session
+                # Build available tools by querying each session once
+                pass
+            # Query each session and add qualified tools
+            for alias, session in self.sessions.items():
+                tools_resp = await session.list_tools()
+                for tool in tools_resp.tools:
+                    available_tools.append({
+                        "name": f"{alias}__{tool.name}",
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    })
+        else:
+            response = await self.session.list_tools()
+            available_tools = [{
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.inputSchema
+            } for tool in response.tools]
 
         
         iteration = 0
@@ -168,7 +227,14 @@ class MCPClient:
                 try:
                     logger.info("mcp.tool.execute", extra={"name": tool_name})
                     # Execute tool call
-                    result = await self.session.call_tool(tool_name, tool_args)
+                    if self.sessions and "__" in tool_name:
+                        alias, short_name = tool_name.split("__", 1)
+                        target_session = self.sessions.get(alias)
+                        if target_session is None:
+                            raise ValueError(f"No MCP session for alias {alias}")
+                        result = await target_session.call_tool(short_name, tool_args)
+                    else:
+                        result = await self.session.call_tool(tool_name, tool_args)
                     
                     tool_output = str(result.content)
                     print(f"Tool '{tool_name}' output: {tool_output}")
@@ -266,17 +332,43 @@ class MCPClient:
         """
         import uuid
 
-        if self.session is None:
-            # If caller forgot to connect, provide a clear error
-            yield {"type": "error", "message": "MCP session not initialized"}
-            return
+        if self.session is None and not self.sessions:
+            # Auto-connect if configured via MCP_SERVERS
+            servers_env = os.getenv("MCP_SERVERS", "").strip()
+            if servers_env:
+                alias_to_path: Dict[str, str] = {}
+                for part in servers_env.split(";"):
+                    if not part:
+                        continue
+                    if "=" not in part:
+                        continue
+                    alias, path = part.split("=", 1)
+                    alias_to_path[alias.strip()] = path.strip()
+                if alias_to_path:
+                    await self.connect_to_servers(alias_to_path)
+            if self.session is None and not self.sessions:
+                # If caller forgot to connect, provide a clear error
+                yield {"type": "error", "message": "MCP session not initialized"}
+                return
 
         # Discover tools from MCP server
-        tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
-        available_tools = [
-            {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
-            for t in tools_resp.tools
-        ]
+        # Build tools list (single or multi-session)
+        available_tools: List[Dict[str, Any]] = []
+        if self.sessions:
+            for alias, session in self.sessions.items():
+                tools_resp = await session.list_tools()  # type: ignore[func-returns-value]
+                for t in tools_resp.tools:
+                    available_tools.append({
+                        "name": f"{alias}__{t.name}",
+                        "description": t.description,
+                        "input_schema": t.inputSchema,
+                    })
+        else:
+            tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
+            available_tools = [
+                {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+                for t in tools_resp.tools
+            ]
 
         messages: List[Dict[str, Any]] = [
             {"role": "user", "content": [{"type": "text", "text": query}]}
@@ -372,8 +464,15 @@ class MCPClient:
                 for call in pending_tool_calls:
                     yield {"type": "tool_call", "name": call["name"], "args": call["args"]}
                     try:
-                        # Execute via MCP
-                        result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
+                        # Execute via MCP (dispatch by alias if needed)
+                        if self.sessions and "__" in call["name"]:
+                            alias, short_name = call["name"].split("__", 1)
+                            target_session = self.sessions.get(alias)
+                            if target_session is None:
+                                raise ValueError(f"No MCP session for alias {alias}")
+                            result = await target_session.call_tool(short_name, call["args"])  # type: ignore[func-returns-value]
+                        else:
+                            result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
                         content_str = str(result.content)
                         yield {"type": "tool_result", "name": call["name"], "content": content_str}
                         tool_results_content.append(

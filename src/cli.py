@@ -9,7 +9,9 @@ from typing import Optional
 import click
 
 from .orchestrator import AgentOrchestrator, OrchestratorRequest
+from dotenv import load_dotenv
 
+load_dotenv()
 
 @click.group()
 def cli() -> None:

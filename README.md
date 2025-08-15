@@ -503,6 +503,39 @@ Modules:
 - `src/api.py`: FastAPI app (`/agent/run`)
 - `src/cli.py`: CLI (`hitl-mcp run`)
 
+### MCP Multi-Server Support
+
+Expose tools from multiple MCP servers in a single conversation by setting `MCP_SERVERS`:
+
+```bash
+export MCP_SERVERS="google=/abs/path/google_mcp/google_admin/mcp_server.py;jira=/abs/path/jira_mcp/server.py"
+```
+
+The client will qualify tool names by alias (e.g., `jira/create_project`, `jira/bulk_issue_upload`, `google/list_users`) and dispatch calls to the correct server.
+
+CLI example:
+
+```bash
+uv run hitl-mcp run \
+  --user-id cking \
+  --query "create jira project called test-project-cking" \
+  --environment dev
+```
+
+### Jira MCP
+
+This repo includes a simple Jira MCP server at `jira_mcp/server.py` exposing:
+- `create_project`
+- `bulk_issue_upload`
+
+Required environment variables for Jira access:
+
+```bash
+export JIRA_BASE_URL="https://your-domain.atlassian.net"
+export JIRA_EMAIL="service-account@your-domain.com"
+export JIRA_API_TOKEN="<api token>"
+```
+
 Environment:
 
 - `APPROVAL_SFN_ARN` (optional locally)

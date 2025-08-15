@@ -29,11 +29,7 @@ from pydantic import BaseModel, Field
 class ApprovalCategory(str, Enum):
     """Semantic categories for actions that may require approval."""
 
-    DATA_EXFILTRATION = "data_exfiltration"
-    FINANCIAL = "financial"
-    PRIVILEGED_WRITE = "privileged_write"
-    EXTERNAL_API_CALL = "external_api_call"
-    USER_DATA_ACCESS = "user_data_access"
+    USER_ACCOUNT_ACCESS = "user_account_access"
     AWS_ROLE_ACCESS = "aws_role_access"
     OTHER = "other"
 
@@ -42,11 +38,7 @@ class ApprovalCategory(str, Enum):
         """Default risk weight for the category (1-10)."""
 
         risk_map: Dict[ApprovalCategory, int] = {
-            ApprovalCategory.DATA_EXFILTRATION: 9,
-            ApprovalCategory.FINANCIAL: 8,
-            ApprovalCategory.PRIVILEGED_WRITE: 7,
-            ApprovalCategory.EXTERNAL_API_CALL: 5,
-            ApprovalCategory.USER_DATA_ACCESS: 6,
+            ApprovalCategory.USER_ACCOUNT_ACCESS: 10,
             ApprovalCategory.AWS_ROLE_ACCESS: 8,
             ApprovalCategory.OTHER: 3,
         }
@@ -123,27 +115,16 @@ class _RawPolicy:
 
 DEFAULT_RULES: List[PolicyRule] = [
     PolicyRule(
-        name="deny_prod_exfiltration",
-        categories=[ApprovalCategory.DATA_EXFILTRATION],
-        environments=["prod", "production"],
-        deny=True,
-    ),
-    PolicyRule(
         name="require_approval_for_aws_role_access",
         categories=[ApprovalCategory.AWS_ROLE_ACCESS],
         require_approval=True,
     ),
     PolicyRule(
-        name="approve_required_privileged_writes",
-        categories=[ApprovalCategory.PRIVILEGED_WRITE],
+        name="require_approval_for_user_google_account_maintenance",
+        categories=[ApprovalCategory.USER_ACCOUNT_ACCESS],
         require_approval=True,
     ),
-    PolicyRule(
-        name="financial_threshold_approval",
-        categories=[ApprovalCategory.FINANCIAL],
-        min_amount=100.0,
-        require_approval=True,
-    ),
+
 ]
 
 
