@@ -121,8 +121,20 @@ class AgentOrchestrator:
 
         client = MCPClient()
         try:
-            await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
-            response_text = await client.process_query(full_query) 
+            servers_env = os.getenv("MCP_SERVERS", "").strip()
+            if servers_env:
+                # Auto-connect handled in process_query, but we connect explicitly to fail fast on misconfig
+                alias_to_path = {}
+                for part in servers_env.split(";"):
+                    if not part or "=" not in part:
+                        continue
+                    alias, path = part.split("=", 1)
+                    alias_to_path[alias.strip()] = path.strip()
+                if alias_to_path:
+                    await client.connect_to_servers(alias_to_path)
+            else:
+                await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
+            response_text = await client.process_query(full_query)
         finally:
             await client.cleanup()
 

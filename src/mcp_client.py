@@ -3,10 +3,14 @@ import asyncio
 import json
 import logging
 import os
+import random
+import time
 from contextlib import AsyncExitStack
-from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator
+from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator, Tuple
 
 import boto3
+from botocore.config import Config as BotoConfig
+from botocore import exceptions as botocore_exceptions
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -50,7 +54,108 @@ class MCPClient:
         # Initialize session and client objects
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
-        self.bedrock = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
+        # Configure boto3 client with adaptive retries and a larger connection pool
+        aws_region = os.environ['AWS_REGION']
+        boto_config = BotoConfig(
+            retries={"max_attempts": 10, "mode": "adaptive"},
+            max_pool_connections=50,
+            connect_timeout=5,
+            read_timeout=120,
+        )
+        self.bedrock = boto3.client('bedrock-runtime', region_name=aws_region, config=boto_config)
+        # Multi-server support
+        self.sessions: Dict[str, ClientSession] = {}
+        self.tool_registry: Dict[str, Tuple[str, str]] = {}
+
+    def _is_retryable_bedrock_error(self, exc: Exception) -> bool:
+        """Return True if the exception is a transient/retryable Bedrock error."""
+        # Network and timeout issues
+        if isinstance(
+            exc,
+            (
+                botocore_exceptions.ReadTimeoutError,
+                botocore_exceptions.ConnectTimeoutError,
+                botocore_exceptions.EndpointConnectionError,
+            ),
+        ):
+            return True
+        # API-level errors
+        if isinstance(exc, botocore_exceptions.ClientError):
+            code = exc.response.get('Error', {}).get('Code', '')
+            return code in {
+                'ServiceUnavailableException',
+                'ThrottlingException',
+                'ModelNotReadyException',
+                'TooManyRequestsException',
+            }
+        # Some SDKs raise specific generated classes that subclass ClientError; detect by name
+        name = exc.__class__.__name__
+        if name in {
+            'ServiceUnavailableException',
+            'ThrottlingException',
+            'ModelNotReadyException',
+        }:
+            return True
+        return False
+
+    def _invoke_with_retries(self, *, model_id: str, body: Dict[str, Any], max_retries: int = 6, base_delay_seconds: float = 0.5) -> Dict[str, Any]:
+        """Call Bedrock invoke_model with exponential backoff and jitter.
+
+        Retries on transient Bedrock errors such as service unavailability,
+        throttling, model not ready, and network/timeout issues.
+
+        Args:
+            model_id: Bedrock model identifier.
+            body: Request body to serialize as JSON.
+            max_retries: Maximum number of retry attempts on transient failures.
+            base_delay_seconds: Initial backoff delay; doubled each retry with jitter.
+
+        Returns:
+            Raw response dict from boto3 (includes a 'body' stream).
+        """
+        attempt = 0
+        while True:
+            try:
+                return self.bedrock.invoke_model(modelId=model_id, body=json.dumps(body))
+            except Exception as exc:  # noqa: BLE001 - filtered by helper
+                if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
+                    logger.error("bedrock.invoke_model.failed", extra={"attempt": attempt, "error": str(exc)})
+                    raise
+                delay = (base_delay_seconds * (2 ** attempt)) + random.uniform(0, 0.25)
+                logger.warning(
+                    "bedrock.invoke_model.retrying",
+                    extra={"attempt": attempt + 1, "delay_seconds": round(delay, 3), "error": str(exc)},
+                )
+                time.sleep(delay)
+                attempt += 1
+
+    def _invoke_stream_with_retries(self, *, model_id: str, body: Dict[str, Any], max_retries: int = 6, base_delay_seconds: float = 0.5) -> Dict[str, Any]:
+        """Call Bedrock invoke_model_with_response_stream with retry/backoff.
+
+        Args:
+            model_id: Bedrock model identifier.
+            body: Request body to serialize as JSON.
+            max_retries: Maximum number of retry attempts on transient failures.
+            base_delay_seconds: Initial backoff delay; doubled each retry with jitter.
+
+        Returns:
+            Raw response dict from boto3 (includes a streaming 'body').
+        """
+        attempt = 0
+        while True:
+            try:
+                return self.bedrock.invoke_model_with_response_stream(modelId=model_id, body=json.dumps(body))
+            except Exception as exc:  # noqa: BLE001
+                if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
+                    logger.error("bedrock.invoke_model_stream.failed", extra={"attempt": attempt, "error": str(exc)})
+                    raise
+                delay = (base_delay_seconds * (2 ** attempt)) + random.uniform(0, 0.25)
+                logger.warning(
+                    "bedrock.invoke_model_stream.retrying",
+                    extra={"attempt": attempt + 1, "delay_seconds": round(delay, 3), "error": str(exc)},
+                )
+                time.sleep(delay)
+                attempt += 1
 
     async def connect_to_server(self, server_script_path: str) -> None:
         """Connect to an MCP server.
@@ -86,6 +191,52 @@ class MCPClient:
         tool_names = [tool.name for tool in tools]
         logger.info("mcp.connect.done", extra={"tools": ",".join(tool_names)})
 
+    @staticmethod
+    def _parse_servers_env(servers_env: str) -> Dict[str, str]:
+        """Parse MCP_SERVERS env var into a mapping {alias: path}.
+
+        Supports separators "=" or ":" between alias and path, and ";" between entries.
+        """
+        mapping: Dict[str, str] = {}
+        for part in (servers_env or "").split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            sep = "=" if "=" in part else (":" if ":" in part else None)
+            if not sep:
+                continue
+            alias, path = part.split(sep, 1)
+            mapping[alias.strip()] = os.path.expanduser(path.strip())
+        return mapping
+
+    async def connect_to_servers(self, alias_to_path: Dict[str, str]) -> None:
+        """Connect to multiple MCP servers and build a qualified tool registry.
+
+        Args:
+            alias_to_path: Mapping from alias (e.g., "google", "jira") to server script path
+        """
+        for alias, server_script_path in alias_to_path.items():
+            server_script_path = os.path.expanduser(server_script_path)
+            is_python = server_script_path.endswith('.py')
+            is_js = server_script_path.endswith('.js')
+            if not (is_python or is_js):
+                raise ValueError(f"Server script must be a .py or .js file for alias {alias}")
+
+            command = "python" if is_python else "node"
+            server_params = StdioServerParameters(command=command, args=[server_script_path], env=None)
+            logger.info("mcp.connect.begin", extra={"alias": alias, "command": command, "script": server_script_path})
+            stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+            stdio, write = stdio_transport
+            session = await self.exit_stack.enter_async_context(ClientSession(stdio, write))
+            await session.initialize()
+            self.sessions[alias] = session
+
+            response = await session.list_tools()
+            for tool in response.tools:
+                qualified_name = f"{alias}__{tool.name}"
+                self.tool_registry[qualified_name] = (alias, tool.name)
+            logger.info("mcp.connect.done", extra={"alias": alias, "tool_count": len(response.tools)})
+
     async def process_query(self, query: str) -> str:
         """Process a query using Claude on Bedrock and available tools.
         
@@ -96,6 +247,13 @@ class MCPClient:
             The response from Claude after potentially calling tools
         """
         logger.info("mcp.process_query", extra={"query_preview": query[:200]})
+        # Auto-connect to multiple servers if configured and none connected
+        if self.session is None and not self.sessions:
+            servers_env = os.getenv("MCP_SERVERS", "").strip()
+            if servers_env:
+                mapping = self._parse_servers_env(servers_env)
+                if mapping:
+                    await self.connect_to_servers(mapping)
         messages = [
             {
                 "role": "user",
@@ -103,12 +261,29 @@ class MCPClient:
             }
         ]
 
-        response = await self.session.list_tools()
-        available_tools = [{
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
+        # Discover tools from either single session or multi-sessions
+        available_tools: List[Dict[str, Any]] = []
+        if self.sessions:
+            for qualified, (_alias, _tname) in self.tool_registry.items():
+                # We cannot fetch input schema here without another call; rely on list_tools per session
+                # Build available tools by querying each session once
+                pass
+            # Query each session and add qualified tools
+            for alias, session in self.sessions.items():
+                tools_resp = await session.list_tools()
+                for tool in tools_resp.tools:
+                    available_tools.append({
+                        "name": f"{alias}__{tool.name}",
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    })
+        else:
+            response = await self.session.list_tools()
+            available_tools = [{
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.inputSchema
+            } for tool in response.tools]
 
         
         iteration = 0
@@ -128,9 +303,9 @@ class MCPClient:
 
             # Claude API call via Bedrock
             logger.debug(f"Calling Claude with {len(messages)} messages and {len(available_tools)} tools")
-            response = self.bedrock.invoke_model(
-                modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-                body=json.dumps(request_body)
+            response = self._invoke_with_retries(
+                model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                body=request_body,
             )
 
             response_body = json.loads(response['body'].read())
@@ -168,7 +343,14 @@ class MCPClient:
                 try:
                     logger.info("mcp.tool.execute", extra={"name": tool_name})
                     # Execute tool call
-                    result = await self.session.call_tool(tool_name, tool_args)
+                    if self.sessions and "__" in tool_name:
+                        alias, short_name = tool_name.split("__", 1)
+                        target_session = self.sessions.get(alias)
+                        if target_session is None:
+                            raise ValueError(f"No MCP session for alias {alias}")
+                        result = await target_session.call_tool(short_name, tool_args)
+                    else:
+                        result = await self.session.call_tool(tool_name, tool_args)
                     
                     tool_output = str(result.content)
                     print(f"Tool '{tool_name}' output: {tool_output}")
@@ -221,9 +403,9 @@ class MCPClient:
             "system": SYSTEM_PROMPT,
         }
 
-        response = self.bedrock.invoke_model_with_response_stream(
-            modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-            body=json.dumps(request_body)
+        response = self._invoke_stream_with_retries(
+            model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            body=request_body,
         )
 
         # The streaming body yields events; `chunk` contains the JSON lines
@@ -266,17 +448,36 @@ class MCPClient:
         """
         import uuid
 
-        if self.session is None:
-            # If caller forgot to connect, provide a clear error
-            yield {"type": "error", "message": "MCP session not initialized"}
-            return
+        if self.session is None and not self.sessions:
+            # Auto-connect if configured via MCP_SERVERS
+            servers_env = os.getenv("MCP_SERVERS", "").strip()
+            if servers_env:
+                mapping = self._parse_servers_env(servers_env)
+                if mapping:
+                    await self.connect_to_servers(mapping)
+            if self.session is None and not self.sessions:
+                # If caller forgot to connect, provide a clear error
+                yield {"type": "error", "message": "MCP session not initialized"}
+                return
 
         # Discover tools from MCP server
-        tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
-        available_tools = [
-            {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
-            for t in tools_resp.tools
-        ]
+        # Build tools list (single or multi-session)
+        available_tools: List[Dict[str, Any]] = []
+        if self.sessions:
+            for alias, session in self.sessions.items():
+                tools_resp = await session.list_tools()  # type: ignore[func-returns-value]
+                for t in tools_resp.tools:
+                    available_tools.append({
+                        "name": f"{alias}__{t.name}",
+                        "description": t.description,
+                        "input_schema": t.inputSchema,
+                    })
+        else:
+            tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
+            available_tools = [
+                {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+                for t in tools_resp.tools
+            ]
 
         messages: List[Dict[str, Any]] = [
             {"role": "user", "content": [{"type": "text", "text": query}]}
@@ -300,9 +501,9 @@ class MCPClient:
             current_tool_id: Optional[str] = None
             tool_input_buffer: List[str] = []
 
-            response = self.bedrock.invoke_model_with_response_stream(
-                modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-                body=json.dumps(request_body),
+            response = self._invoke_stream_with_retries(
+                model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                body=request_body,
             )
             stream = response.get("body")
             if stream is None:
@@ -372,8 +573,15 @@ class MCPClient:
                 for call in pending_tool_calls:
                     yield {"type": "tool_call", "name": call["name"], "args": call["args"]}
                     try:
-                        # Execute via MCP
-                        result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
+                        # Execute via MCP (dispatch by alias if needed)
+                        if self.sessions and "__" in call["name"]:
+                            alias, short_name = call["name"].split("__", 1)
+                            target_session = self.sessions.get(alias)
+                            if target_session is None:
+                                raise ValueError(f"No MCP session for alias {alias}")
+                            result = await target_session.call_tool(short_name, call["args"])  # type: ignore[func-returns-value]
+                        else:
+                            result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
                         content_str = str(result.content)
                         yield {"type": "tool_result", "name": call["name"], "content": content_str}
                         tool_results_content.append(
