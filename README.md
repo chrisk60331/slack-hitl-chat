@@ -542,6 +542,17 @@ Environment:
 - `AWS_REGION`
 - `ENVIRONMENT`
 - `POLICY_PATH` (optional)
+- `MCP_SERVERS` (optional): `alias=abs_path;alias2=abs_path2` or `alias:abs_path` entries; multiple entries separated by `;`.
+
+### Bedrock Client Reliability
+
+The MCP client now configures the Bedrock runtime client with adaptive retries and a larger connection pool and adds client-side exponential backoff with jitter for both non-streaming and streaming requests. This mitigates transient errors like `ServiceUnavailableException` ("Too many connections, please wait before trying again").
+
+Tests:
+
+```bash
+uv run pytest tests/test_bedrock_retries.py -q
+```
 
 Run API locally:
 
