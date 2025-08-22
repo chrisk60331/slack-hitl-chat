@@ -113,11 +113,11 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         Catch = [
           {
             ErrorEquals = ["States.TaskFailed"]
-            Next        = "ExecutionFailed"
+            Next        = "NotifyCompletion"
           },
           {
             ErrorEquals = ["States.ALL"]
-            Next        = "ExecutionFailed"
+            Next        = "NotifyCompletion"
           }
         ]
         Next = "NotifyCompletion"
@@ -153,21 +153,15 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         }
         End = true
       }
-      ExecutionFailed = {
-        Type   = "Pass"
-        Result = {
-          status  = "execution_failed"
-          message = "Request was approved but execution failed"
-        }
-        End = true
-      }
       ApprovalFailed = {
         Type   = "Pass"
-        Result = {
-          status  = "failed"
-          message = "Approval process failed"
+        Parameters = {
+          "status" = "rejected"
+          "message" = "Approval Failed"
+          "request_id.$" = "$.body.request_id"
+          "execute_result" = "Approval Failed."
         }
-        End = true
+        Next = "NotifyCompletion"
       }
     }
   })

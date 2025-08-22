@@ -448,7 +448,7 @@ def _handle_new_approval_request(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Upsert record for audit/completion
     table.put_item(Item=approval_item.to_dynamodb_item())
-    _slack_update(slack_channel, slack_ts, f"{decision.rationale}")
+    _slack_update(slack_channel, slack_ts, f"Request ID: {deterministic_request_id}\n{decision.rationale}")
     return {
         'statusCode': 200,
         'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
@@ -515,7 +515,7 @@ def send_notifications(
         'reason': reason,
         'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     }
-
+    print(f"message_content {message_content}")
     # Slack notifications
     try:
         # Prefer Block Kit via bot token and channel when configured

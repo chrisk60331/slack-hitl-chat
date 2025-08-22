@@ -18,13 +18,9 @@ Notes:
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 import os
-import time
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
-import asyncio
+from typing import Any, Dict, Iterable, Set
 
 import boto3
 import requests
@@ -33,6 +29,7 @@ from .secrets import get_secret_json
 from .slack_session_store import SlackSessionStore
 from src.mcp_client import MCPClient
 from src.approval_handler import compute_request_id_from_action
+from src.approval_handler import _handle_new_approval_request
 
 # In-memory best-effort dedupe for local/dev. In AWS, prefer DynamoDB.
 _SEEN_EVENT_IDS: Set[str] = set()
@@ -64,21 +61,6 @@ def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
     return True
 
 
-def _verify_slack_request(signing_secret: str, timestamp: str, raw_body: bytes, signature: str, *, tolerance: int = 60 * 5) -> bool:
-    if not signing_secret or not timestamp or not signature:
-        return False
-    try:
-        ts = int(timestamp)
-    except Exception:
-        return False
-    if abs(int(time.time()) - ts) > tolerance:
-        return False
-    basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}".encode("utf-8")
-    digest = hmac.new(signing_secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
-    expected = f"v0={digest}"
-    return hmac.compare_digest(expected, signature)
-
-
 def _slack_api(method: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     url = f"https://slack.com/api/{method}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
@@ -87,11 +69,6 @@ def _slack_api(method: str, token: str, payload: Dict[str, Any]) -> Dict[str, An
         return resp.json()
     except Exception:
         return {"ok": False, "error": f"http_{resp.status_code}"}
-
-
-def _yield_chunks(text: str, chunk_size: int = 800) -> Iterable[str]:
-    for i in range(0, len(text), chunk_size):
-        yield text[i : i + chunk_size]
 
 
 def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
@@ -234,19 +211,25 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Only handle user-originated message or app_mention events
     event_obj = (body.get("event") or {})
+    channel_id = event_obj.get("channel", "")
+    thread_ts = event_obj.get("thread_ts") or event_obj.get("ts", "")
+    user_text = event_obj.get("text", "")
+    action_text = event_obj.get("text", "")
+    request_id = compute_request_id_from_action(action_text)
+    if table.get_item(Key={"request_id": request_id}).get("Item"):
+        print(f"request_id {compute_request_id_from_action(action_text)} found in table")
+        return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
+    else:
+        request_id = _handle_new_approval_request({
+            "slack_channel": channel_id,
+            "slack_ts": thread_ts,
+            "proposed_action": action_text,
+        }).get("body").get("request_id")
     event_type = str(event_obj.get("type") or "")
     event_subtype = event_obj.get("subtype")
     if bool(event_obj.get("bot_id")):
         return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": "bot_message"})}
-    try:
-        print({
-            "info": "slack_event_type",
-            "event_type": event_type,
-            "event_subtype": event_subtype,
-            "has_bot_id": bool(event_obj.get("bot_id")),
-        })
-    except Exception:
-        pass
+
     if event_obj.get("bot_id"):
         return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": "bot_message"})}
     if event_type not in {"message", "app_mention"}:
@@ -255,9 +238,7 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if event_type == "message" and event_subtype:
         return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped_subtype": event_subtype})}
 
-    channel_id = event_obj.get("channel", "")
-    thread_ts = event_obj.get("thread_ts") or event_obj.get("ts", "")
-    user_text = event_obj.get("text", "")
+    
     if event_type == "app_mention" and user_text:
         # Strip the mention prefix like "<@U12345> "
         try:
@@ -269,15 +250,7 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Resolve bot token from Secrets (or env fallback)
     bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
-    try:
-        print({
-            "info": "slack_bot_token_check",
-            "from_secret": bool(secrets.get("bot_token")),
-            "from_env": bool(os.environ.get("SLACK_BOT_TOKEN")),
-            "has_token": bool(bot_token),
-        })
-    except Exception:
-        pass
+    
     if not bot_token:
         return {"statusCode": 500, "body": "missing bot token"}
 
@@ -301,42 +274,21 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         pass
     # Always post initial message once
-    action_text = event_obj.get("text", "")
-    if table.get_item(Key={"request_id": compute_request_id_from_action(action_text)}).get("Item"):
-        print(f"request_id {compute_request_id_from_action(action_text)} found in table")
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
     ts = initial.get("ts") or (thread_ts if event_obj.get("thread_ts") else None)
 
     
     try:
-        response = boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).start_execution(
+        boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).start_execution(
             stateMachineArn=os.environ.get('STATE_MACHINE_ARN', ''),
             input=json.dumps({
                 "proposed_action": action_text,
                 "slack_channel": channel_id,
-                "slack_ts": ts
+                "slack_ts": ts,
+                "request_id": request_id
             })
         )
-        _slack_api(
-            "chat.update",
-            bot_token,
-            {
-                "channel": channel_id,
-                "ts": ts,
-                "text": "Thinking..."
-            },
-        )
-        execution_arn = response.get('executionArn', '')
-        execution_history = boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).get_execution_history(
-            executionArn=execution_arn,
-            maxResults=100
-        ).get('events', [])
-        request_id = [
-            json.loads(k['stateEnteredEventDetails']['input']).get('request_id') 
-            for k in execution_history if 'stateEnteredEventDetails' in k 
-            if json.loads(k['stateEnteredEventDetails']['input']).get('request_id')
-        ][0]
+
         print(f"request_id {request_id}")
         _slack_api(
             "chat.update",

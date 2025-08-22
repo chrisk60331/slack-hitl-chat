@@ -147,7 +147,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             raise ValueError("Either action_text or request_id must be provided")
         
-        return {
+        result = {
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
@@ -155,7 +155,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             },
             'body': response_body
         }
-        
+        print(f"result {result}")
+        return result
+
     except Exception as e:
         logger.error(f"Lambda execution failed: {e}")
         logger.error(f"Lambda exception type: {type(e)}")

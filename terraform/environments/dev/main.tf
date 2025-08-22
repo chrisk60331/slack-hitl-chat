@@ -121,8 +121,8 @@ module "execute_lambda" {
   docker_target                    = "execute"
   handler_file                     = "src/execute_handler.py"
   lambda_execution_role_arn        = module.iam.execute_lambda_execution_role_arn
-  lambda_timeout                   = var.execute_lambda_timeout
-  lambda_memory_size               = var.execute_lambda_memory_size
+  lambda_timeout                   = 900
+  lambda_memory_size               = 10240
   private_subnet_ids               = module.networking.private_subnet_ids
   lambda_security_group_id         = module.networking.lambda_security_group_id
   create_function_url              = false
