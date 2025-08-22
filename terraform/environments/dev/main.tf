@@ -79,8 +79,6 @@ module "iam" {
   aws_region                = var.aws_region
   private_subnet_ids        = module.networking.private_subnet_ids
   dynamodb_table_arns       = module.dynamodb.table_arns
-  lambda_function_arn       = "" # Will be populated after lambda module
-  stepfunctions_arn         = "" # Will be populated after stepfunctions module
   enable_bedrock_guardrails = var.enable_bedrock_guardrails
   bedrock_guardrail_id      = var.bedrock_guardrail_id
   tags                      = local.common_tags
@@ -107,7 +105,6 @@ module "approval_lambda" {
   environment_variables = {
     TABLE_NAME         = module.dynamodb.approval_log_table_name
     SLACK_WEBHOOK_URL  = var.slack_webhook_url
-    TEAMS_WEBHOOK_URL  = var.teams_webhook_url
     APPROVAL_LAMBDA_FUNCTION_NAME =  "${local.name_prefix}_approval"
     SLACK_BOT_TOKEN = var.slack_bot_token
     SLACK_CHANNEL_ID = var.slack_channel_id
@@ -141,7 +138,7 @@ module "execute_lambda" {
     MCP_PORT           = var.mcp_port
     LOG_LEVEL          = "INFO"
     SLACK_WEBHOOK_URL  = var.slack_webhook_url
-    APPROVAL_LAMBDA_FUNCTION_NAME = module.approval_lambda.lambda_function_name
+    APPROVAL_LAMBDA_FUNCTION_NAME =  "${local.name_prefix}_approval"
     SLACK_BOT_TOKEN = var.slack_bot_token
     SLACK_CHANNEL_ID = var.slack_channel_id
   }

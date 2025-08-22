@@ -11,13 +11,26 @@ import uuid
 import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-import base64
+from enum import Enum
 
 import boto3
 import requests
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
+from src.policy import (
+    PolicyEngine,
+    ProposedAction,
+    ApprovalOutcome,
+    infer_category_and_resource,
+)
 
+
+class COMPLETION_STATUS(Enum):
+    PENDING: str = "pending"
+    IN_PROGRESS: str = "in_progress"
+    COMPLETED: str = "completed"
+    FAILED: str = "failed"
+    CANCELED: str = "canceled"
 
 class ApprovalItem(BaseModel):
     """Pydantic model for approval request items."""
@@ -32,6 +45,8 @@ class ApprovalItem(BaseModel):
     # Optional Slack thread metadata for completion updates
     slack_channel: str = ""
     slack_ts: str = ""
+    completion_status: str = ""
+    completion_message: str = ""
 
     def to_dynamodb_item(self) -> Dict[str, Any]:
         """Convert to DynamoDB item format."""
@@ -88,13 +103,27 @@ sns = boto3.client('sns', region_name=os.environ['AWS_REGION'])
 # Configuration
 TABLE_NAME = os.environ['TABLE_NAME']
 SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN', '')
-LAMBDA_FUNCTION_URL = os.environ.get('LAMBDA_FUNCTION_URL', '')
-
 # Optional webhook integrations
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
 TEAMS_WEBHOOK_URL = os.environ.get('TEAMS_WEBHOOK_URL', '')
 
 table = dynamodb.Table(TABLE_NAME)
+
+
+# Helper to update Slack message thread
+def _slack_update(slack_channel: str, slack_ts: str, text: str) -> None:
+    try:
+        if slack_channel and slack_ts:
+            from src.slack_lambda import _slack_api  # lazy import to avoid cycles
+            bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            if bot_token:
+                _slack_api(
+                    "chat.update",
+                    bot_token,
+                    {"channel": slack_channel, "ts": slack_ts, "text": text},
+                )
+    except Exception as e:  # pragma: no cover - best effort
+        print(f"Slack update failed: {e}")
 
 
 def get_lambda_function_url() -> str:
@@ -106,9 +135,13 @@ def get_lambda_function_url() -> str:
     """
     lambda_client = boto3.client('lambda', region_name=os.environ['AWS_REGION'])
     function_name = os.environ.get('APPROVAL_LAMBDA_FUNCTION_NAME', '')
-
-    response = lambda_client.get_function_url_config(FunctionName=function_name)
-    return response.get('FunctionUrl', '')
+    if not function_name:
+        return ""
+    try:
+        response = lambda_client.get_function_url_config(FunctionName=function_name)
+        return response.get('FunctionUrl', '')
+    except Exception:
+        return ""
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -369,79 +402,63 @@ def _handle_new_approval_request(event: Dict[str, Any]) -> Dict[str, Any]:
     if 'Input' in event:
         event = event['Input']
     print(f"_handle_new_approval_request event {event}")
-    proposed_action_text = event.get('proposed_action', '') or ''
+
+    proposed_action_text = (event.get('proposed_action') or '').strip()
+    slack_channel = event.get('slack_channel', '')
+    slack_ts = event.get('slack_ts', '')
+
     # Compute deterministic request_id from action text
     deterministic_request_id = compute_request_id_from_action(proposed_action_text)
 
-    # If an item with this request_id already exists, return it (de-dup)
-    try:
-        existing = table.get_item(Key={'request_id': deterministic_request_id}).get('Item')
-    except Exception:
-        existing = None
-
-    if existing:
-        existing_item = ApprovalItem.from_dynamodb_item(existing)
-        response_data = {
-            'request_id': existing_item.request_id,
-            'status': existing_item.approval_status,
-            'timestamp': existing_item.timestamp,
-            'notification_sent': False,
-            'proposed_action': existing_item.proposed_action
-        }
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': response_data
-        }
+    # Evaluate policy using orchestrator policy code
+    inferred_category, inferred_resource = infer_category_and_resource(proposed_action_text)
+    proposed_action = ProposedAction(
+        tool_name="auto",
+        description=proposed_action_text,
+        category=inferred_category,
+        resource=inferred_resource,
+        environment=os.getenv("ENVIRONMENT", "dev"),
+        user_id=event.get('requester') or "slack_user",
+    )
+    decision = PolicyEngine().evaluate(proposed_action)
 
     approval_item = ApprovalItem(
         request_id=deterministic_request_id,
         requester=event.get('requester', ''),
         approver=event.get('approver', ''),
-        agent_prompt=event.get('agent_prompt', ''),
+        agent_prompt=event.get('agent_prompt', proposed_action_text),
         proposed_action=proposed_action_text,
-        reason=event.get('reason', ''),
-        approval_status=event.get('approval_status', 'pending'),
-        slack_channel=event.get('slack_channel', ''),
-        slack_ts=event.get('slack_ts', ''),
+        reason="Allowed by policy",
+        approval_status=decision.outcome,
+        slack_channel=slack_channel,
+        slack_ts=slack_ts,
+        completion_status=str(COMPLETION_STATUS.PENDING),
+        completion_message=decision.outcome,
     )
-    
-    action = approval_item.approval_status
-    
-    # Send notifications
-    notification_sent = send_notifications(
+
+    send_notifications(
         request_id=approval_item.request_id,
-        action=action,
+        action=approval_item.approval_status,
         requester=approval_item.requester,
         approver=approval_item.approver,
         agent_prompt=approval_item.agent_prompt,
         proposed_action=approval_item.proposed_action,
         reason=approval_item.reason
     )
-    
-    # Store in DynamoDB
+
+    # Upsert record for audit/completion
     table.put_item(Item=approval_item.to_dynamodb_item())
-    
-    # Prepare response
-    response_data = {
-        'request_id': approval_item.request_id,
-        'status': action,
-        'timestamp': approval_item.timestamp,
-        'notification_sent': notification_sent,
-        'proposed_action': approval_item.proposed_action
-    }
-    
+    _slack_update(slack_channel, slack_ts, f"{decision.rationale}")
     return {
         'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-        },
-        'body': response_data
+        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+        'body': {
+            'request_id': deterministic_request_id,
+            'status': decision.outcome,
+            'message': decision.rationale,
+        }
     }
+
 
 
 def send_notifications(
@@ -475,7 +492,7 @@ def send_notifications(
         status_emoji = "⏳"
         action_text = "Pending Approval"
         status = "pending"
-    elif action == "approve":
+    elif action == ApprovalOutcome.ALLOW:
         status_emoji = "✅"
         action_text = "Approved"
         status = "✅ Approved"
@@ -608,8 +625,8 @@ def send_slack_notification(content: Dict[str, str]) -> bool:
         function_url = get_lambda_function_url()
         if function_url:
             rid = content.get('request_id', '')
-            approve_link = f"{function_url}?request_id={rid}&action=approve"
-            reject_link = f"{function_url}?request_id={rid}&action=reject"
+            approve_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.ALLOW}"
+            reject_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.DENY}"
             lines.extend(["", "*Approval Actions:*", f"Approve: {approve_link}", f"Reject: {reject_link}"])
 
     payload = {"text": "\n".join(lines)}

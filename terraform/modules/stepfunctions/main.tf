@@ -61,6 +61,11 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
             Variable      = "$.body.status"
             StringEquals  = "failed"
             Next          = "NotifyCompletion"
+          },
+          {
+            Variable      = "$.body.status"
+            StringEquals  = "pending"
+            Next          = "WaitForApproval"
           }
         ]
         Default = "WaitForApproval"

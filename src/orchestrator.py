@@ -106,7 +106,7 @@ class AgentOrchestrator:
         self.memory.append("system", f"Approval requested for: {proposed.description} (id={request_id})")
 
         status = self._wait_for_approval(request_id)
-        if status != "approve":
+        if status != ApprovalOutcome.ALLOW:
             return OrchestratorResult(status="not_approved", request_id=request_id, message=f"Approval status: {status}")
 
         result = await self._execute_direct(request)
@@ -215,7 +215,7 @@ class AgentOrchestrator:
         )
         while time.time() < deadline:
             item = get_approval_status(request_id)
-            if item and item.approval_status in {"approve", "reject"}:
+            if item and item.approval_status in {ApprovalOutcome.ALLOW, ApprovalOutcome.DENY}:
                 print(
                     f"Approval item found: request_id={request_id} status={item.approval_status}"
                 )

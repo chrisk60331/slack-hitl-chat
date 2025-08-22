@@ -131,6 +131,34 @@ curl -s -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations"
 
 When deploying via Terraform, the function package type is Image and the runtime will invoke `src.api.handler` automatically.
 
+### Local Execute Lambda: build, seed approval, and invoke
+
+Use the provided script to rebuild the execute Lambda image, start DynamoDB Local and the execute container, seed a specific approval item, and invoke the Lambda with your `request_id` payload.
+
+```bash
+# Make the script executable (first run only)
+chmod +x scripts/run_execute_local.sh
+
+# Rebuild, start services, seed the approval item, and invoke the execute Lambda
+./scripts/run_execute_local.sh
+```
+
+What it does:
+- Builds `execute-lambda` image from the `Dockerfile` target
+- Starts `dynamodb-local` and `execute-lambda` via `docker-compose`
+- Ensures DynamoDB table `agentcore-approvals-local` exists
+- Seeds the approval item with request_id `f953495133cf577b0904206facd3308a263be370c80d0d7b994af6a5d0d9a276`
+- Invokes the Lambda runtime at `http://localhost:9000/2015-03-31/functions/function/invocations` with:
+
+```json
+{
+  "execution_timeout": 300,
+  "request_id": "f953495133cf577b0904206facd3308a263be370c80d0d7b994af6a5d0d9a276"
+}
+```
+
+Note: If `.env` is missing, the script creates a minimal one with `AWS_REGION=us-east-1`.
+
 ### 3. Deploy to Other Environments
 
 ```bash
@@ -508,7 +536,7 @@ Modules:
 Expose tools from multiple MCP servers in a single conversation by setting `MCP_SERVERS`:
 
 ```bash
-export MCP_SERVERS="google=/abs/path/google_mcp/google_admin/mcp_server.py;jira=/abs/path/jira_mcp/server.py"
+export MCP_SERVERS="google=/abs/path/google_mcp/google_admin/mcp_server.py;jira=/abs/path/jira_mcp/server.py;calendar=/abs/path/google_mcp/google_calendar/mcp_server.py;totp=/abs/path/totp_mcp/mcp_server.py"
 ```
 
 The client will qualify tool names by alias (e.g., `jira/create_project`, `jira/bulk_issue_upload`, `google/list_users`) and dispatch calls to the correct server.
@@ -543,6 +571,94 @@ Environment:
 - `ENVIRONMENT`
 - `POLICY_PATH` (optional)
 - `MCP_SERVERS` (optional): `alias=abs_path;alias2=abs_path2` or `alias:abs_path` entries; multiple entries separated by `;`.
+
+### Google Calendar MCP (Slack auto-scheduler)
+
+Adds Google Calendar tools powered by the upstream server design in `nspady/google-calendar-mcp` [link](https://github.com/nspady/google-calendar-mcp).
+
+Tools (alias `calendar`):
+- `list_calendars`
+- `freebusy`
+- `create_event`
+- `get_event`
+- `delete_event`
+
+Scopes used:
+- `https://www.googleapis.com/auth/calendar`
+- `https://www.googleapis.com/auth/calendar.events`
+- `https://www.googleapis.com/auth/calendar.readonly`
+
+Environment variables:
+
+```bash
+export GCAL_CLIENT_ID=...
+export GCAL_CLIENT_SECRET=...
+export GCAL_REDIRECT_URI=http://localhost
+export GCAL_ALLOWED_DOMAINS="yourcompany.com,partner.org"
+# optional
+export GCAL_TOKEN_PATH="$HOME/.config/agentcore/gcal_token.json"
+```
+
+Usage examples (natural language via Slack auto-scheduler):
+
+```text
+Find a 60-minute slot next week when my primary and team calendars are free.
+```
+
+Direct tool call examples:
+
+```json
+{
+  "tool": "calendar__freebusy",
+  "request": {
+    "calendar_ids": ["primary", "team@yourcompany.com"],
+    "time_min": "2025-08-01T09:00:00-04:00",
+    "time_max": "2025-08-01T18:00:00-04:00",
+    "timezone": "America/New_York"
+  }
+}
+```
+
+```json
+{
+  "tool": "calendar__create_event",
+  "request": {
+    "calendar_id": "primary",
+    "summary": "Sync with London team",
+    "start": "2025-08-04T10:00:00-04:00",
+    "end": "2025-08-04T11:00:00-04:00",
+    "attendees": [{"email": "jane@yourcompany.com"}],
+    "conference": "zoom",
+    "conferenceData": {"createRequest": {"requestId": "abc123"}},
+    "zoom_url": "https://zoom.us/j/123456789"
+  }
+}
+```
+
+Rules enforced:
+- Inputs must be ISO8601 with timezone; invalid requests return MCP tool_error
+- Attendee emails must be in `GCAL_ALLOWED_DOMAINS`
+- No auto-Google Meet; Zoom is attached only if `conference: "zoom"` and `conferenceData` provided
+- Free/busy queries batch per calendar
+
+Manifest: `google_mcp/google_calendar/manifest.json` lists the tools and required env vars.
+
+
+### TOTP MCP
+
+Adds a minimal TOTP server with one tool: `get_totp_code`.
+
+- Tool alias: `totp__get_totp_code`
+- Inputs:
+  - `secret_name` (string, required): AWS Secrets Manager secret name. The value can be a raw base32 string, or JSON like `{ "secret": "BASE32VALUE" }`.
+  - `key_field` (string, optional): JSON key when the secret is a JSON object. Default `secret`.
+  - `period` (int, optional): Time step in seconds. Default `30`.
+  - `digits` (int, optional): Code length. Default `6`.
+  - `secret_region` (string, optional): AWS region for the secret; falls back to `AWS_REGION`.
+
+Example natural language prompt via Slack: "Send the current TOTP code for Prod VPN using the totp server; the secret is in Secrets Manager under name prod/vpn/totp."
+
+When invoked through the standard approval/execution flow, the final code will be posted back to the original Slack message (via `src/completion_notifier.py` using stored `channel` and `ts`).
 
 ### Bedrock Client Reliability
 

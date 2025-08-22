@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.approval_handler import get_approval_status
 from src.mcp_client import MCPClient
+from src.approval_handler import COMPLETION_STATUS
 
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
@@ -35,7 +36,16 @@ logging.getLogger('pydantic_ai').setLevel(logging.DEBUG)
 logging.getLogger('asyncio').setLevel(logging.DEBUG)
 
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb', region_name=os.environ['AWS_REGION'])
+if os.getenv('LOCAL_DEV', 'false') == 'true':
+    ddb_params = {
+        'endpoint_url': 'http://agentcore-dynamodb-local:8000',
+        'aws_access_key_id': 'test',
+        'aws_secret_access_key': 'test'
+    }
+else:
+    ddb_params = {}
+
+dynamodb = boto3.resource('dynamodb', region_name=os.environ['AWS_REGION'], **ddb_params)
 TABLE_NAME = os.environ['TABLE_NAME']
 table = dynamodb.Table(TABLE_NAME)
 
@@ -59,7 +69,19 @@ class ExecutionResult(BaseModel):
 async def invoke_mcp_client(action_text: str):
     client = MCPClient()
     try:
-        await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
+        # Prefer multi-server configuration when provided
+        servers_env = os.getenv("MCP_SERVERS", "").strip()
+        if servers_env:
+            alias_to_path: Dict[str, str] = {}
+            for part in servers_env.split(";"):
+                if not part or "=" not in part:
+                    continue
+                alias, path = part.split("=", 1)
+                alias_to_path[alias.strip()] = path.strip()
+            if alias_to_path:
+                await client.connect_to_servers(alias_to_path)
+        else:
+            await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
         result = await client.process_query(action_text)
     finally:
         await client.cleanup()
@@ -110,6 +132,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 request_id = execution_request.request_id or "direct_execution"
                 logger.info(f"Executing action for request {request_id}: {action_text}")
                 response_body = asyncio.run(invoke_mcp_client(action_text))
+                table.update_item(
+                    Key={'request_id': request_id},
+                    UpdateExpression='SET completion_status = :status, completion_message = :message',
+                    ExpressionAttributeValues={
+                        ':status': str(COMPLETION_STATUS.COMPLETED),
+                        ':message': response_body
+                    }
+                )
             action_text = approval_item.proposed_action
             request_id = execution_request.request_id
             logger.debug(f"Retrieved action from DynamoDB: {action_text}")

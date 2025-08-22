@@ -32,10 +32,13 @@ import requests
 from .secrets import get_secret_json
 from .slack_session_store import SlackSessionStore
 from src.mcp_client import MCPClient
+from src.approval_handler import compute_request_id_from_action
 
 # In-memory best-effort dedupe for local/dev. In AWS, prefer DynamoDB.
 _SEEN_EVENT_IDS: Set[str] = set()
-
+TABLE_NAME = os.environ['TABLE_NAME']
+dynamodb = boto3.resource('dynamodb', region_name=os.environ['AWS_REGION'])
+table = dynamodb.Table(TABLE_NAME)
 
 def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
     """Best-effort dedupe to avoid processing the same Slack event multiple times.
@@ -216,16 +219,7 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     secret_name = os.environ.get("SLACK_SECRETS_NAME", "")
     secrets = get_secret_json(secret_name) if secret_name else {}
     body = json.loads(raw_body.decode("utf-8") or "{}")
-    print(f"request body {body}")
-    # Basic visibility in logs for debugging (no secrets)
-    try:
-        print({
-            "info": "slack_event_received",
-            "headers_present": list((event.get("headers") or {}).keys()),
-            "body_keys": list((body or {}).keys()),
-        })
-    except Exception:
-        pass
+
     # URL verification challenge
     if body.get("type") == "url_verification":
         print({"statusCode": 200, "headers": {"Content-Type": "text/plain"}, "body": body.get("challenge", "")})
@@ -307,10 +301,23 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         pass
     # Always post initial message once
+    action_text = event_obj.get("text", "")
+    if table.get_item(Key={"request_id": compute_request_id_from_action(action_text)}).get("Item"):
+        print(f"request_id {compute_request_id_from_action(action_text)} found in table")
+        return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
     ts = initial.get("ts") or (thread_ts if event_obj.get("thread_ts") else None)
-    action_text = event_obj.get("text", "")
+
+    
     try:
+        response = boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).start_execution(
+            stateMachineArn=os.environ.get('STATE_MACHINE_ARN', ''),
+            input=json.dumps({
+                "proposed_action": action_text,
+                "slack_channel": channel_id,
+                "slack_ts": ts
+            })
+        )
         _slack_api(
             "chat.update",
             bot_token,
@@ -319,14 +326,6 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "ts": ts,
                 "text": "Thinking..."
             },
-        )
-        response = boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).start_execution(
-            stateMachineArn=os.environ.get('STATE_MACHINE_ARN', ''),
-            input=json.dumps({
-                "proposed_action": action_text,
-                "slack_channel": channel_id,
-                "slack_ts": ts
-            })
         )
         execution_arn = response.get('executionArn', '')
         execution_history = boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).get_execution_history(

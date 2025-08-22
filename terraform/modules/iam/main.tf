@@ -321,7 +321,9 @@ resource "aws_iam_policy" "agentcore_stepfunctions_policy" {
           "states:StartExecution",
           "states:DescribeExecution",
           "states:StopExecution",
-          "states:ListExecutions"
+          "states:ListExecutions",
+          "states:GetExecutionHistory",
+          "lambda:InvokeFunction"    
         ]
         Resource = "*"
       }

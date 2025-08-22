@@ -1,0 +1,119 @@
+Summary ,Description,Acceptance Criteria/ What we need to do,Ticket Type for Scrum ,Ticket Type for Kanban
+POC SOW Review ,Review the POC SOW with the customer and send for signatures ,,Task,Task
+"Verification of NDA, POC SOW and MSA(if applicable)","Verify on the Sales Tracker and follow up with Sales if NDA, POC SOW and MSA(if applicable) is not signed.",,Task,Task
+Kick Off Call and Deck ,"1. Sales - Schedule Kick-Off call 
+2. Kick Off Deck 
+3. Action Items or Next Steps ","In Comments 
+1. Add Kick Off Deck link 
+2. Add the date of the call and recording
+3. Action Items  ",Story,Task
+JIRA Board Setup ,"1. Create JIRA Project 
+2. Create the JIRA board
+3. Create the Generic Tickets - PM related 
+4. Dev Tickets","In Comments 
+Add JIRA Board Link",Story,Task
+Bootstrapping ,Setting up initial connections between NMD and Client Systems for the POC.,"In Comments 
+Add the date of the call and if completed via email mention that too",Story,Task
+Discovery Session,"1. Schedule and facilitate a discovery call 
+2. Understand business objectives, technical environments, and project requirements.
+3. Make sure the team is ready for POC work with all technical requirements.","In Comments 
+1. Add the date of the call and recording 
+2. Attach documents if any ",Story,Task
+Backlog Refinement,"1. Schedule and facilitate the call
+2. Create the development stories with the Data Engineer.
+3. Review it with PC/SA and finalize the work with due dates.","In Comments 
+1. Add the date of the call 
+2. JIRA board link with all the tickets 
+3. All development tickets need to have details agreed upon by team and with due dates. ",Task,Task
+Daily Stand Up ,"Set up daily stand up calls based on team to discuss
+1. What are we doing today 
+2. What is completed 
+3. Any impediments 
+4. Any review or feedback if necessary","In Comments 
+Add the time once scheduled",Task,Task
+Weekly Update/ Demo Call,"1. Schedule and facilitate the call
+2. Create the Weekly Deck 
+3. Demo the work and get feedback 
+4. Action Items ","In Comments 
+1. Add the date of the call and recording 
+2. Deck Link 
+3. Action Items  ",Task,Task
+Runbook/Read me ,"Write a comprehensive documentation which includes :
+1. Introduction 
+2. Architectural Details 
+3. Troubleshooting 
+4. Other Details 
+Training Videos if required 
+Overall Support and Knowledge Transfer on the call.","In Comments 
+1. Attach the Documentation
+2. Video Links if any",Story,Task
+Proposed Architecture,Generate an architectural diagram based on the given user requirements and the approach we suggest.,Attach the diagram screenshot,Story,Task
+UAT Deployment ,Deploy the working and tested code to Client UAT as a final handover and enable them for user acceptance testing.,"In Comments 
+1. Add the date of deployment with screenshot of the app",Story,Task
+Final Delivery Call and Sign Off ,"1. Schedule the Final Delivery Call
+2. Create the Delivery Deck 
+3. Demo the final POC 
+4. Demo the Documentation 
+5. Get the Sign Off form approved via  SignRequest","In Comments 
+1. Add the date of the call and recording 
+2. Deck Link 
+3. Sign Off Form   ",Story,Task
+Future State Discovery ,"Leverage the POC work and initial requirements to identify future state improvements, new feature opportunities, and potential production capabilities.",Document or PPT ,Story,Task
+Proposed Prod SOW ,Based on the future state discovery put down the SOW document and schedule a review session with the customer. ,SOW Document and Review with Customer,Story,Task
+Deactivate the services used on NMD AWS and Customer AWS for the POC,"Terminate all services used for the POC implementation in the NMD AWS account once the POC is successfully deployed to the customer account. 
+
+Check with the customer at the end of the POC if they want to bring down the services.",,Task,Task
+Rapid Assessment - Business Context Interview ,"Conduct an Interview with the CEO/CTO/Product Owner/Operation Lead to cover the following:
+
+-> Use Case Discovery
+* Business Context and Use Case Definition
+* Technical Requirements and Constraints
+* Implementation Considerations
+* Evaluation and Success Metrics
+* Use-case Prioritization
+
+-> Compliance and Integration Discovery
+* Regulatory Compliance
+* Security Considerations
+* Enterprise Integration
+* Governance & Risk Management
+* Legal and Licensing",,Story,Task
+Rapid AI Assessment - Technical Discovery Interview ,"Conduct an Interview with the CTO/DevOps/Technical Leads/Developers/Data Engineers/Data Scientist to cover the following:
+
+-> Existing GenAI Application Assessment (optional)
+* Usage Metrics
+* LLM and Model Information
+* Agent and Function Implementations
+* Prompt Engineering and Management
+* RAG (Retrieval-Augmented Generation)  Implementation
+* Security and Governance
+* Performance and SLAs
+* Model Outputs and Samples
+
+-> Data Readiness Discovery
+* Data Volume & Storage Requirements
+* Data Format & Preprocessing
+* AI-Specific Data Preparation
+* Data Quality & Governance
+
+-> Compliance and Integration Discovery
+* Regulatory Compliance
+* Security Considerations
+* Enterprise Integration
+* Governance & Risk Management
+* Legal and Licensing
+
+-> Model Evaluation
+* Prepare Data Samples
+* Select Evaluation Frameworks and  Metrics
+* Model Selection
+* Evaluation and Optimization
+",,Story,Task
+Rapid AI Assessment (Document),"Based on the interview sessions, prepare a comprehensive AI Assessment document aimed at identifying, evaluating, and planning GenAI use cases and organizational readiness.
+
+This document should help uncover high-impact AI opportunities, assess the technical and data preparedness of the organization, ensure compliance with relevant standards and regulations, and define a clear path toward successful GenAI implementation.",,Story,Task
+Rapid AI Assessment (Model Evaluation),,,Story,Story
+Rapid AI Assessment - Delivery and Sign Off ,"1. Schedule the Final Delivery Call
+2. Create the Delivery Deck 
+3. Demo the AI Assessment and Evaluation
+5. Get the Sign Off form approved via SignRequest",,Story,Story

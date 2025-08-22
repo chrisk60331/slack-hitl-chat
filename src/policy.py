@@ -48,7 +48,7 @@ class ApprovalCategory(str, Enum):
 class ApprovalOutcome(str, Enum):
     """Decision outcomes for proposed actions."""
 
-    ALLOW = "allow"
+    ALLOW = "approve"
     REQUIRE_APPROVAL = "require_approval"
     DENY = "deny"
 

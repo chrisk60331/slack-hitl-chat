@@ -29,13 +29,23 @@ CMD ["src.approval_handler.lambda_handler"]
 # Execute handler Lambda target
 FROM base AS execute
 COPY .env ./
-COPY google_mcp/ ./google_mcp/
+WORKDIR "/var/task"
+COPY JIRA_Tickets__-_JIRA_tickets_template.csv /var/task/
+COPY google_mcp/ /var/task/google_mcp/
+COPY google_mcp/google_calendar/ /var/task/google_calendar/
+COPY google_mcp/google_admin/ ./google_admin/
+COPY totp_mcp/ ./totp_mcp/
+COPY jira_mcp/ ./jira_mcp/
 CMD ["src.execute_handler.lambda_handler"] 
 
 # Slack handler Lambda target
 FROM base AS slack
 COPY .env ./
 COPY google_mcp/ ./google_mcp/
+COPY google_mcp/google_calendar/ ./google_calendar/
+COPY google_mcp/google_admin/ ./google_admin/
+COPY totp_mcp/ ./totp_mcp/
+COPY jira_mcp/ ./jira_mcp/
 CMD ["src.slack_lambda.lambda_handler"]
 
 # Completion notifier Lambda target

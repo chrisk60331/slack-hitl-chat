@@ -28,6 +28,7 @@ import time
 import json as _json
 from urllib.parse import quote_plus
 
+from src.policy import ApprovalOutcome
 
 def _build_slack_text(
     content: Dict[str, str],
@@ -80,14 +81,14 @@ def _build_slack_text(
             function_url = ""
         if function_url:
             request_id = content.get("request_id", "")
-            approve_link = f"{function_url}?request_id={request_id}&action=approve"
-            reject_link = f"{function_url}?request_id={request_id}&action=reject"
+            approve_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.ALLOW}"
+            reject_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.DENY}"
             lines.extend(
                 [
                     "",
                     "*Approval Actions:*",
-                    f"Approve:{approve_link}|",
-                    f"Reject: {reject_link}|",
+                    f"Approve: {approve_link}",
+                    f"Reject: {reject_link}",
                 ]
             )
 
@@ -148,8 +149,8 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
     requester = content.get("requester", "")
     proposed_action = content.get("proposed_action", "")
 
-    approve_value = _json.dumps({"request_id": request_id, "action": "approve"}, separators=(",", ":"))
-    reject_value = _json.dumps({"request_id": request_id, "action": "reject"}, separators=(",", ":"))
+    approve_value = _json.dumps({"request_id": request_id, "action": ApprovalOutcome.ALLOW}, separators=(",", ":"))
+    reject_value = _json.dumps({"request_id": request_id, "action": ApprovalOutcome.DENY}, separators=(",", ":"))
 
     blocks: list[Dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": title, "emoji": True}},
@@ -168,14 +169,14 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
                     "type": "button",
                     "style": "primary",
                     "text": {"type": "plain_text", "text": "Approve"},
-                    "action_id": "approve",
+                    "action_id": ApprovalOutcome.ALLOW,
                     "value": approve_value,
                 },
                 {
                     "type": "button",
                     "style": "danger",
                     "text": {"type": "plain_text", "text": "Reject"},
-                    "action_id": "reject",
+                    "action_id": ApprovalOutcome.DENY,
                     "value": reject_value,
                 },
             ],
@@ -279,7 +280,7 @@ def parse_action_from_interaction(payload: Dict[str, Any]) -> Tuple[str, str, st
         parsed = {}
     request_id = parsed.get("request_id") or payload.get("container", {}).get("message_ts") or ""
     action = parsed.get("action") or action
-    if action not in {"approve", "reject"}:
+    if action not in {ApprovalOutcome.ALLOW, ApprovalOutcome.DENY}:
         raise ValueError("Unknown action")
     user_id = (payload.get("user") or {}).get("id") or ""
     if not request_id or not user_id:
