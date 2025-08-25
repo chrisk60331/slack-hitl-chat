@@ -8,11 +8,10 @@ prompts for the MCP client without changing the MCP client implementation.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Deque, Iterable, List, Tuple
 
-
-Message = Tuple[str, str]
+Message = tuple[str, str]
 
 
 @dataclass(slots=True)
@@ -24,7 +23,7 @@ class ShortTermMemory:
     """
 
     max_turns: int = 6
-    _messages: Deque[Message] = field(init=False, repr=False)
+    _messages: deque[Message] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._messages = deque(maxlen=self.max_turns)
@@ -51,7 +50,7 @@ class ShortTermMemory:
         if not self._messages:
             return ""
 
-        lines: List[str] = [
+        lines: list[str] = [
             "Context recap (recent messages):",
         ]
         for role, content in self._messages:
@@ -61,5 +60,3 @@ class ShortTermMemory:
             lines.append(f"- {role}: {trimmed}")
 
         return "\n".join(lines)
-
-

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
 
 from src.orchestrator import AgentOrchestrator, OrchestratorRequest
-from src.policy import ApprovalCategory
 
 
 @pytest.mark.asyncio
@@ -47,7 +45,9 @@ async def test_orchestrator_allow_short_circuit(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_infers_aws_role_access_requires_approval(monkeypatch: Any) -> None:
+async def test_orchestrator_infers_aws_role_access_requires_approval(
+    monkeypatch: Any,
+) -> None:
     # Patch out approval start/wait to avoid AWS deps; simulate immediate reject to end quickly
     orch = AgentOrchestrator()
 
@@ -57,8 +57,14 @@ async def test_orchestrator_infers_aws_role_access_requires_approval(monkeypatch
     def fake_wait_for_approval(_request_id: str, *_args: Any, **_kwargs: Any) -> str:
         return "reject"
 
-    monkeypatch.setattr(AgentOrchestrator, "_start_approval", lambda self, x: fake_start_approval(x))
-    monkeypatch.setattr(AgentOrchestrator, "_wait_for_approval", lambda self, rid, **kwargs: fake_wait_for_approval(rid))
+    monkeypatch.setattr(
+        AgentOrchestrator, "_start_approval", lambda self, x: fake_start_approval(x)
+    )
+    monkeypatch.setattr(
+        AgentOrchestrator,
+        "_wait_for_approval",
+        lambda self, rid, **kwargs: fake_wait_for_approval(rid),
+    )
 
     req = OrchestratorRequest(
         user_id="user",
@@ -70,4 +76,3 @@ async def test_orchestrator_infers_aws_role_access_requires_approval(monkeypatch
     )
     result = await orch.run(req)
     assert result.status == "not_approved"
-

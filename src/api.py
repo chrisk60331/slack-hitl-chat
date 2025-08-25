@@ -5,18 +5,17 @@ This wraps existing code paths and does not modify existing handlers.
 
 from __future__ import annotations
 
-import os
 import json
-from typing import Any, Dict
+import logging
+import os
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .orchestrator import AgentOrchestrator, OrchestratorRequest
 from .mcp_client import MCPClient
-import logging
-
+from .orchestrator import AgentOrchestrator, OrchestratorRequest
 
 app = FastAPI(title="AgentCore Orchestrator API")
 _orchestrator = AgentOrchestrator()
@@ -35,19 +34,19 @@ class RunPayload(BaseModel):
 
 
 @app.post("/agent/run")
-async def start_run(payload: RunPayload) -> Dict[str, Any]:
+async def start_run(payload: RunPayload) -> dict[str, Any]:
     req = OrchestratorRequest(**payload.model_dump())
     result = await _orchestrator.run(req)
     return result.model_dump()
 
 
 @app.get("/healthz")
-async def healthz() -> Dict[str, str]:
+async def healthz() -> dict[str, str]:
     return {"status": "ok", "env": os.getenv("ENVIRONMENT", "dev")}
 
 
 @app.post("/slack/interactions")
-async def slack_interactions(request: Request) -> Dict[str, str]:
+async def slack_interactions(request: Request) -> dict[str, str]:
     """Slack interactivity endpoint for Block Kit button actions.
 
     Verifies Slack signature, parses payload, applies approval decision,
@@ -57,8 +56,12 @@ async def slack_interactions(request: Request) -> Dict[str, str]:
     signature = request.headers.get("X-Slack-Signature", "")
     timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
 
-    from .slack_helper import verify_slack_request, parse_action_from_interaction, respond_via_response_url
     from .approval_handler import _handle_approval_decision
+    from .slack_helper import (
+        parse_action_from_interaction,
+        respond_via_response_url,
+        verify_slack_request,
+    )
 
     signing_secret = os.getenv("SLACK_SIGNING_SECRET", "")
     if not verify_slack_request(signing_secret, timestamp, raw_body, signature):
@@ -77,7 +80,14 @@ async def slack_interactions(request: Request) -> Dict[str, str]:
     request_id, action, user_id = parse_action_from_interaction(payload)
 
     # Apply approval decision via existing handler
-    event = {"body": {"request_id": request_id, "action": action, "approver": user_id, "reason": "via Slack"}}
+    event = {
+        "body": {
+            "request_id": request_id,
+            "action": action,
+            "approver": user_id,
+            "reason": "via Slack",
+        }
+    }
     _ = _handle_approval_decision(event)
 
     # Update original message
@@ -99,7 +109,7 @@ class CreateSessionResponse(BaseModel):
 class PostMessageRequest(BaseModel):
     query: str
     user_id: str | None = None
-    metadata: Dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class PostMessageResponse(BaseModel):
@@ -112,7 +122,7 @@ def _ensure_session(session_id: str) -> dict[str, Any]:
 
 
 @app.post("/gateway/v1/sessions", response_model=CreateSessionResponse)
-async def create_session() -> Dict[str, str]:
+async def create_session() -> dict[str, str]:
     import uuid
 
     session_id = f"s-{uuid.uuid4().hex[:10]}"
@@ -120,8 +130,10 @@ async def create_session() -> Dict[str, str]:
     return {"session_id": session_id}
 
 
-@app.post("/gateway/v1/sessions/{session_id}/messages", response_model=PostMessageResponse)
-async def post_message(session_id: str, payload: PostMessageRequest) -> Dict[str, str]:
+@app.post(
+    "/gateway/v1/sessions/{session_id}/messages", response_model=PostMessageResponse
+)
+async def post_message(session_id: str, payload: PostMessageRequest) -> dict[str, str]:
     import asyncio
     import uuid
 
@@ -143,7 +155,9 @@ async def post_message(session_id: str, payload: PostMessageRequest) -> Dict[str
                 },
             )
             # Ensure MCP server is connected for tool execution
-            server_path = os.getenv("MCP_SERVER_PATH", "google_mcp/google_admin/mcp_server.py")
+            server_path = os.getenv(
+                "MCP_SERVER_PATH", "google_mcp/google_admin/mcp_server.py"
+            )
             logger.info("gateway.producer.connect", extra={"server_path": server_path})
             await client.connect_to_server(server_path)
             async for event in client.stream_conversation(payload.query):
@@ -161,7 +175,10 @@ async def post_message(session_id: str, payload: PostMessageRequest) -> Dict[str
             except Exception:
                 pass
             await queue.put("__EOF__")
-            logger.info("gateway.producer.end", extra={"session_id": session_id, "message_id": message_id})
+            logger.info(
+                "gateway.producer.end",
+                extra={"session_id": session_id, "message_id": message_id},
+            )
 
     # Fire-and-forget producer
     asyncio.create_task(_produce())
@@ -181,7 +198,7 @@ async def stream(session_id: str, cursor: str) -> StreamingResponse:
         while True:
             data = await queue.get()
             if data == "__EOF__":
-                yield "data: {\"type\": \"end\"}\n\n"
+                yield 'data: {"type": "end"}\n\n'
                 break
             yield f"data: {data}\n\n"
             await asyncio.sleep(0)  # cooperative scheduling

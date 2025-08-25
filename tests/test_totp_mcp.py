@@ -1,9 +1,11 @@
 import json
-from typing import Dict
 
-import pytest
-
-from totp_mcp.mcp_server import _base32_decode_no_padding, _hotp, _totp_from_base32, _extract_base32_secret
+from totp_mcp.mcp_server import (
+    _base32_decode_no_padding,
+    _extract_base32_secret,
+    _hotp,
+    _totp_from_base32,
+)
 
 
 def test_base32_decode_padding():
@@ -28,10 +30,6 @@ def test_totp_fixed_time():
 
 
 def test_extract_base32_secret_from_json():
-    payload: Dict[str, str] = {"secret": "JBSWY3DPEHPK3PXP"}
+    payload: dict[str, str] = {"secret": "JBSWY3DPEHPK3PXP"}
     raw = json.dumps(payload)
     assert _extract_base32_secret(raw, "secret") == "JBSWY3DPEHPK3PXP"
-
-
-
-

@@ -1,6 +1,3 @@
-import asyncio
-import types
-from typing import Dict
 
 import pytest
 
@@ -45,7 +42,9 @@ async def test_connect_to_servers_registry(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr("src.mcp_client.stdio_client", lambda _params: FakeStdioClient())
+    monkeypatch.setattr(
+        "src.mcp_client.stdio_client", lambda _params: FakeStdioClient()
+    )
     monkeypatch.setattr("src.mcp_client.ClientSession", FakeClientSession)
 
     await client.connect_to_servers({"a": "s1.py", "b": "s2.py"})
@@ -56,5 +55,3 @@ async def test_connect_to_servers_registry(monkeypatch):
         resp = await session.list_tools()
         tools.extend([f"{alias}/{t.name}" for t in resp.tools])
     assert set(tools) == {"a/t1", "a/t2", "b/t1", "b/t2"}
-
-

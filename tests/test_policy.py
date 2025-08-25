@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from src.policy import (
+    ApprovalCategory,
     ApprovalOutcome,
     PolicyEngine,
     ProposedAction,
-    ApprovalCategory,
     infer_category_and_resource,
 )
 
@@ -75,4 +75,3 @@ def test_policy_requires_approval_for_aws_role_access() -> None:
     )
     decision = engine.evaluate(action)
     assert decision.outcome == ApprovalOutcome.REQUIRE_APPROVAL
-

@@ -6,7 +6,9 @@ from src.completion_notifier import lambda_handler
 
 @patch("boto3.resource")
 @patch("src.slack_lambda._slack_api")
-def test_notifier_updates_slack(mock_slack_api: MagicMock, mock_resource: MagicMock) -> None:
+def test_notifier_updates_slack(
+    mock_slack_api: MagicMock, mock_resource: MagicMock
+) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
     os.environ["SLACK_BOT_TOKEN"] = "xoxb-test"
@@ -37,5 +39,3 @@ def test_notifier_missing_request_id(mock_resource: MagicMock) -> None:
     os.environ["TABLE_NAME"] = "tbl"
     resp = lambda_handler({}, None)
     assert resp["body"]["skipped"] == "missing_request_id"
-
-

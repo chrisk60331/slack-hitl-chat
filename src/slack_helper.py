@@ -17,22 +17,22 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import os
-from typing import Any, Callable, Dict, Optional, Tuple
-
-import requests
 import hashlib
 import hmac
-import time
 import json as _json
-from urllib.parse import quote_plus
+import os
+import time
+from collections.abc import Callable
+from typing import Any
+
+import requests
 
 from src.policy import ApprovalOutcome
 
+
 def _build_slack_text(
-    content: Dict[str, str],
-    function_url_getter: Optional[Callable[[], str]] = None,
+    content: dict[str, str],
+    function_url_getter: Callable[[], str] | None = None,
 ) -> str:
     """Build the Slack message text for a webhook post.
 
@@ -81,8 +81,12 @@ def _build_slack_text(
             function_url = ""
         if function_url:
             request_id = content.get("request_id", "")
-            approve_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.ALLOW}"
-            reject_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.DENY}"
+            approve_link = (
+                f"{function_url}?request_id={request_id}&action={ApprovalOutcome.ALLOW}"
+            )
+            reject_link = (
+                f"{function_url}?request_id={request_id}&action={ApprovalOutcome.DENY}"
+            )
             lines.extend(
                 [
                     "",
@@ -96,9 +100,9 @@ def _build_slack_text(
 
 
 def post_slack_webhook_message(
-    content: Dict[str, str],
+    content: dict[str, str],
     *,
-    function_url_getter: Optional[Callable[[], str]] = None,
+    function_url_getter: Callable[[], str] | None = None,
     timeout_seconds: int = 5,
 ) -> bool:
     """Post a message to Slack via Incoming Webhook.
@@ -112,12 +116,12 @@ def post_slack_webhook_message(
     Returns:
         True if Slack accepted the message, False otherwise or when webhook is not configured.
     """
-    webhook_url: Optional[str] = os.environ.get("SLACK_WEBHOOK_URL")
+    webhook_url: str | None = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook_url:
         return False
 
     text: str = _build_slack_text(content, function_url_getter=function_url_getter)
-    payload: Dict[str, Any] = {"text": text}
+    payload: dict[str, Any] = {"text": text}
 
     response = requests.post(webhook_url, json=payload, timeout=timeout_seconds)
     return response.status_code == 200 and response.text.strip().lower() in {"ok", ""}
@@ -133,7 +137,9 @@ __all__ = [
 ]
 
 
-def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Dict[str, Any]:
+def build_block_approval_message(
+    content: dict[str, str], channel_id: str
+) -> dict[str, Any]:
     """Build a Block Kit message with Approve/Reject buttons.
 
     Args:
@@ -149,11 +155,20 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
     requester = content.get("requester", "")
     proposed_action = content.get("proposed_action", "")
 
-    approve_value = _json.dumps({"request_id": request_id, "action": ApprovalOutcome.ALLOW}, separators=(",", ":"))
-    reject_value = _json.dumps({"request_id": request_id, "action": ApprovalOutcome.DENY}, separators=(",", ":"))
+    approve_value = _json.dumps(
+        {"request_id": request_id, "action": ApprovalOutcome.ALLOW},
+        separators=(",", ":"),
+    )
+    reject_value = _json.dumps(
+        {"request_id": request_id, "action": ApprovalOutcome.DENY},
+        separators=(",", ":"),
+    )
 
-    blocks: list[Dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": title, "emoji": True}},
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": title, "emoji": True},
+        },
         {
             "type": "section",
             "fields": [
@@ -161,7 +176,13 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
                 {"type": "mrkdwn", "text": f"*Requester:*\n{requester}"},
             ],
         },
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Proposed Action:*\n{proposed_action}"}},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Proposed Action:*\n{proposed_action}",
+            },
+        },
         {
             "type": "actions",
             "elements": [
@@ -183,7 +204,7 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
         },
     ]
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "channel": channel_id,
         "text": title,
         "unfurl_links": False,
@@ -194,10 +215,10 @@ def build_block_approval_message(content: Dict[str, str], channel_id: str) -> Di
 
 
 def post_slack_block_approval(
-    content: Dict[str, str],
+    content: dict[str, str],
     *,
     channel_id: str,
-    bot_token: Optional[str] = None,
+    bot_token: str | None = None,
     timeout_seconds: int = 5,
 ) -> bool:
     """Post a Block Kit approval message with interactive buttons.
@@ -220,7 +241,12 @@ def post_slack_block_approval(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8",
     }
-    resp = requests.post("https://slack.com/api/chat.postMessage", data=_json.dumps(payload), headers=headers, timeout=timeout_seconds)
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        data=_json.dumps(payload),
+        headers=headers,
+        timeout=timeout_seconds,
+    )
     try:
         data = resp.json()
     except Exception:
@@ -228,7 +254,14 @@ def post_slack_block_approval(
     return resp.status_code == 200 and bool(data.get("ok"))
 
 
-def verify_slack_request(signing_secret: str, timestamp: str, raw_body: bytes, signature: str, *, tolerance: int = 60 * 5) -> bool:
+def verify_slack_request(
+    signing_secret: str,
+    timestamp: str,
+    raw_body: bytes,
+    signature: str,
+    *,
+    tolerance: int = 60 * 5,
+) -> bool:
     """Verify Slack signing signature for interactivity requests.
 
     Args:
@@ -252,8 +285,10 @@ def verify_slack_request(signing_secret: str, timestamp: str, raw_body: bytes, s
     if abs(int(time.time()) - ts) > tolerance:
         return False
 
-    basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}".encode("utf-8")
-    digest = hmac.new(signing_secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
+    basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}".encode()
+    digest = hmac.new(
+        signing_secret.encode("utf-8"), basestring, hashlib.sha256
+    ).hexdigest()
     expected = f"v0={digest}"
     # Constant-time compare
     if not hmac.compare_digest(expected, signature):
@@ -261,7 +296,7 @@ def verify_slack_request(signing_secret: str, timestamp: str, raw_body: bytes, s
     return True
 
 
-def parse_action_from_interaction(payload: Dict[str, Any]) -> Tuple[str, str, str]:
+def parse_action_from_interaction(payload: dict[str, Any]) -> tuple[str, str, str]:
     """Extract (request_id, action, user_id) from Slack interaction payload.
 
     Raises ValueError if required fields are missing.
@@ -278,7 +313,9 @@ def parse_action_from_interaction(payload: Dict[str, Any]) -> Tuple[str, str, st
         parsed = _json.loads(value) if value else {}
     except Exception:
         parsed = {}
-    request_id = parsed.get("request_id") or payload.get("container", {}).get("message_ts") or ""
+    request_id = (
+        parsed.get("request_id") or payload.get("container", {}).get("message_ts") or ""
+    )
     action = parsed.get("action") or action
     if action not in {ApprovalOutcome.ALLOW, ApprovalOutcome.DENY}:
         raise ValueError("Unknown action")
@@ -288,12 +325,12 @@ def parse_action_from_interaction(payload: Dict[str, Any]) -> Tuple[str, str, st
     return request_id, action, user_id
 
 
-def respond_via_response_url(response_url: str, text: str, *, timeout_seconds: int = 5) -> bool:
+def respond_via_response_url(
+    response_url: str, text: str, *, timeout_seconds: int = 5
+) -> bool:
     """Update Slack message via response_url, replacing original blocks with text."""
     if not response_url:
         return False
     payload = {"replace_original": True, "text": text}
     resp = requests.post(response_url, json=payload, timeout=timeout_seconds)
     return 200 <= resp.status_code < 300
-
-

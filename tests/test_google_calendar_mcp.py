@@ -1,9 +1,8 @@
-import os
 import pytest
 
-from google_mcp.google_calendar.service import _iso_has_tz
-from google_mcp.google_calendar.models import CreateEventRequest, Attendee
 from google_mcp.google_calendar import mcp_server as cal_server
+from google_mcp.google_calendar.models import Attendee, CreateEventRequest
+from google_mcp.google_calendar.service import _iso_has_tz
 
 
 def test_iso_has_tz_valid_with_offset():
@@ -50,7 +49,3 @@ def test_create_event_request_email_validation():
             end="2025-01-01T10:00:00-05:00",
             attendees=[Attendee(email="not-an-email")],
         )
-
-
-
-

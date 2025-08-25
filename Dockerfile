@@ -34,8 +34,10 @@ COPY JIRA_Tickets__-_JIRA_tickets_template.csv /var/task/
 COPY google_mcp/ /var/task/google_mcp/
 COPY google_mcp/google_calendar/ /var/task/google_calendar/
 COPY google_mcp/google_admin/ ./google_admin/
+COPY google_mcp/gdrive_mcp/ ./gdrive_mcp/
 COPY totp_mcp/ ./totp_mcp/
 COPY jira_mcp/ ./jira_mcp/
+COPY gif_mcp/ ./gif_mcp/
 CMD ["src.execute_handler.lambda_handler"] 
 
 # Slack handler Lambda target
@@ -44,8 +46,10 @@ COPY .env ./
 COPY google_mcp/ ./google_mcp/
 COPY google_mcp/google_calendar/ ./google_calendar/
 COPY google_mcp/google_admin/ ./google_admin/
+COPY google_mcp/gdrive_mcp/ ./gdrive_mcp/
 COPY totp_mcp/ ./totp_mcp/
 COPY jira_mcp/ ./jira_mcp/
+COPY gif_mcp/ ./gif_mcp/
 CMD ["src.slack_lambda.lambda_handler"]
 
 # Completion notifier Lambda target

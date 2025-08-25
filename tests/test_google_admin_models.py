@@ -52,5 +52,3 @@ def test_remove_role_request_valid():
         identity_provider="arn:aws:iam::123456789012:saml-provider/GoogleIdP",
     )
     assert req.identity_provider.endswith("saml-provider/GoogleIdP")
-
-

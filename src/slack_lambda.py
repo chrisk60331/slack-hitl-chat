@@ -20,22 +20,27 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any, Dict, Iterable, Set
+from collections.abc import Iterable
+from typing import Any
 
 import boto3
 import requests
 
+from src.approval_handler import (
+    _handle_new_approval_request,
+    compute_request_id_from_action,
+)
+from src.mcp_client import MCPClient
+
 from .secrets import get_secret_json
 from .slack_session_store import SlackSessionStore
-from src.mcp_client import MCPClient
-from src.approval_handler import compute_request_id_from_action
-from src.approval_handler import _handle_new_approval_request
 
 # In-memory best-effort dedupe for local/dev. In AWS, prefer DynamoDB.
-_SEEN_EVENT_IDS: Set[str] = set()
-TABLE_NAME = os.environ['TABLE_NAME']
-dynamodb = boto3.resource('dynamodb', region_name=os.environ['AWS_REGION'])
+_SEEN_EVENT_IDS: set[str] = set()
+TABLE_NAME = os.environ["TABLE_NAME"]
+dynamodb = boto3.resource("dynamodb", region_name=os.environ["AWS_REGION"])
 table = dynamodb.Table(TABLE_NAME)
+
 
 def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
     """Best-effort dedupe to avoid processing the same Slack event multiple times.
@@ -61,9 +66,12 @@ def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
     return True
 
 
-def _slack_api(method: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _slack_api(method: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = f"https://slack.com/api/{method}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
     resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=10)
     try:
         return resp.json()
@@ -85,7 +93,9 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
 
     # 1) create message
     post_url = f"{base_url.rstrip('/')}/gateway/v1/sessions/{session_id}/messages"
-    post = requests.post(post_url, json={"query": user_text, "user_id": "slack"}, timeout=30)
+    post = requests.post(
+        post_url, json={"query": user_text, "user_id": "slack"}, timeout=30
+    )
     if not post.ok:
         yield f"AgentCore error: {post.status_code}"
         return
@@ -104,7 +114,11 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
                 if resp.status_code == 404 and attempt == 0:
                     # Best-effort fallback: create a new message cursor and stream again
                     post_url = f"{base}/gateway/v1/sessions/{session_id}/messages"
-                    post = requests.post(post_url, json={"query": user_text, "user_id": "slack"}, timeout=30)
+                    post = requests.post(
+                        post_url,
+                        json={"query": user_text, "user_id": "slack"},
+                        timeout=30,
+                    )
                     if not post.ok:
                         yield f"AgentCore stream error: {resp.status_code}"
                         return
@@ -122,7 +136,7 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
                     continue
                 if not line.startswith("data: "):
                     continue
-                data = line[len("data: ") : ]
+                data = line[len("data: ") :]
                 try:
                     obj = json.loads(data)
                 except Exception:
@@ -137,7 +151,7 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
             return
 
 
-def oauth_redirect_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
+def oauth_redirect_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     """Handle Slack OAuth redirect with `code`, exchange for tokens, store in Secrets Manager.
 
     Returns a simple HTML page indicating success.
@@ -150,7 +164,9 @@ def oauth_redirect_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
     secret_name = os.environ.get("SLACK_SECRETS_NAME", "")
     secrets = get_secret_json(secret_name) if secret_name else {}
     client_id = secrets.get("client_id", os.environ.get("SLACK_CLIENT_ID", ""))
-    client_secret = secrets.get("client_secret", os.environ.get("SLACK_CLIENT_SECRET", ""))
+    client_secret = secrets.get(
+        "client_secret", os.environ.get("SLACK_CLIENT_SECRET", "")
+    )
     redirect_uri = secrets.get("redirect_uri", os.environ.get("SLACK_REDIRECT_URI", ""))
 
     token_resp = requests.post(
@@ -170,7 +186,12 @@ def oauth_redirect_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
     # Store bot/access tokens back into Secrets Manager
     region = os.environ.get("AWS_REGION", "us-east-1")
     sm = boto3.client("secretsmanager", region_name=region)
-    payload = {**secrets, "bot_token": data.get("access_token"), "app_id": data.get("app_id"), "team": data.get("team", {})}
+    payload = {
+        **secrets,
+        "bot_token": data.get("access_token"),
+        "app_id": data.get("app_id"),
+        "team": data.get("team", {}),
+    }
     sm.put_secret_value(SecretId=secret_name, SecretString=json.dumps(payload))
 
     return {
@@ -180,7 +201,7 @@ def oauth_redirect_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
     }
 
 
-def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Handle Slack Events and route to AgentCore.
 
     Supports URL verification and message events. Streams responses back by posting
@@ -199,46 +220,78 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # URL verification challenge
     if body.get("type") == "url_verification":
-        print({"statusCode": 200, "headers": {"Content-Type": "text/plain"}, "body": body.get("challenge", "")})
-        return {"statusCode": 200, "headers": {"Content-Type": "text/plain"}, "body": body.get("challenge", "")}
+        print(
+            {
+                "statusCode": 200,
+                "headers": {"Content-Type": "text/plain"},
+                "body": body.get("challenge", ""),
+            }
+        )
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/plain"},
+            "body": body.get("challenge", ""),
+        }
 
     event_id = str(body.get("event_id") or "")
     is_first_time = _should_process_event(event_id)
     retry_num = (event.get("headers") or {}).get("X-Slack-Retry-Num")
     if retry_num is not None and not is_first_time:
         # Acknowledge duplicate without reprocessing
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": "retry_duplicate"})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "skipped": "retry_duplicate"}),
+        }
 
     # Only handle user-originated message or app_mention events
-    event_obj = (body.get("event") or {})
+    event_obj = body.get("event") or {}
     channel_id = event_obj.get("channel", "")
     thread_ts = event_obj.get("thread_ts") or event_obj.get("ts", "")
     user_text = event_obj.get("text", "")
     action_text = event_obj.get("text", "")
     request_id = compute_request_id_from_action(action_text)
     if table.get_item(Key={"request_id": request_id}).get("Item"):
-        print(f"request_id {compute_request_id_from_action(action_text)} found in table")
+        print(
+            f"request_id {compute_request_id_from_action(action_text)} found in table"
+        )
         return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
     else:
-        request_id = _handle_new_approval_request({
-            "slack_channel": channel_id,
-            "slack_ts": thread_ts,
-            "proposed_action": action_text,
-        }).get("body").get("request_id")
+        request_id = (
+            _handle_new_approval_request(
+                {
+                    "slack_channel": channel_id,
+                    "slack_ts": thread_ts,
+                    "proposed_action": action_text,
+                }
+            )
+            .get("body")
+            .get("request_id")
+        )
     event_type = str(event_obj.get("type") or "")
     event_subtype = event_obj.get("subtype")
     if bool(event_obj.get("bot_id")):
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": "bot_message"})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "skipped": "bot_message"}),
+        }
 
     if event_obj.get("bot_id"):
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": "bot_message"})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "skipped": "bot_message"}),
+        }
     if event_type not in {"message", "app_mention"}:
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped": event_type})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "skipped": event_type}),
+        }
     # Ignore message events with subtypes (edits, joins, etc.) to avoid noise
     if event_type == "message" and event_subtype:
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "skipped_subtype": event_subtype})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "skipped_subtype": event_subtype}),
+        }
 
-    
     if event_type == "app_mention" and user_text:
         # Strip the mention prefix like "<@U12345> "
         try:
@@ -250,7 +303,7 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Resolve bot token from Secrets (or env fallback)
     bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
-    
+
     if not bot_token:
         return {"statusCode": 500, "body": "missing bot token"}
 
@@ -260,33 +313,48 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except ValueError:
         store = None  # type: ignore[assignment]
     if store is not None:
-        session_id = store.get_session_id(channel_id, thread_ts) or f"session-{channel_id}-{thread_ts}"
+        session_id = (
+            store.get_session_id(channel_id, thread_ts)
+            or f"session-{channel_id}-{thread_ts}"
+        )
         store.put_session_id(channel_id, thread_ts, session_id)
     else:
         session_id = f"session-{channel_id}-{thread_ts}"
 
     # Post initial placeholder (avoid including thread_ts when not present)
-    initial_payload: Dict[str, Any] = {"channel": channel_id, "text": "Received your message — preparing a response…"}
+    initial_payload: dict[str, Any] = {
+        "channel": channel_id,
+        "text": "Received your message — preparing a response…",
+    }
     if event_obj.get("thread_ts"):
         initial_payload["thread_ts"] = thread_ts
     try:
-        print({"info": "slack_postMessage_attempt", "channel": channel_id, "has_thread": bool(event_obj.get("thread_ts"))})
+        print(
+            {
+                "info": "slack_postMessage_attempt",
+                "channel": channel_id,
+                "has_thread": bool(event_obj.get("thread_ts")),
+            }
+        )
     except Exception:
         pass
     # Always post initial message once
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
     ts = initial.get("ts") or (thread_ts if event_obj.get("thread_ts") else None)
 
-    
     try:
-        boto3.client('stepfunctions', region_name=os.environ.get('AWS_REGION', 'us-west-2')).start_execution(
-            stateMachineArn=os.environ.get('STATE_MACHINE_ARN', ''),
-            input=json.dumps({
-                "proposed_action": action_text,
-                "slack_channel": channel_id,
-                "slack_ts": ts,
-                "request_id": request_id
-            })
+        boto3.client(
+            "stepfunctions", region_name=os.environ.get("AWS_REGION", "us-west-2")
+        ).start_execution(
+            stateMachineArn=os.environ.get("STATE_MACHINE_ARN", ""),
+            input=json.dumps(
+                {
+                    "proposed_action": action_text,
+                    "slack_channel": channel_id,
+                    "slack_ts": ts,
+                    "request_id": request_id,
+                }
+            ),
         )
 
         print(f"request_id {request_id}")
@@ -296,7 +364,7 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             {
                 "channel": channel_id,
                 "ts": ts,
-                "text": f"Waiting for approval from a human reviewer for request id {request_id}..."
+                "text": f"Request {request_id} is being processed. Please wait...",
             },
         )
 
@@ -304,12 +372,11 @@ def events_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # If async invoke fails, fall back to sync to at least produce a response
         print(f"Error: {e}")
 
-
     # Ack immediately for async path
     return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
 
 
-def _worker_stream_handler(event: Dict[str, Any]) -> None:
+def _worker_stream_handler(event: dict[str, Any]) -> None:
     """Background worker to stream AgentCore output back to Slack.
 
     This is invoked asynchronously via Lambda self-invoke to avoid blocking
@@ -329,6 +396,8 @@ def _worker_stream_handler(event: Dict[str, Any]) -> None:
         return
 
     accumulated = ""
+    accumulated_blocks = None
+
     for chunk in _agentcore_stream(session_id, user_text):
         if not chunk:
             continue
@@ -336,23 +405,39 @@ def _worker_stream_handler(event: Dict[str, Any]) -> None:
             maybe_obj = json.loads(chunk)
         except Exception:
             maybe_obj = None
-        if isinstance(maybe_obj, dict) and maybe_obj.get("type") == "token":
-            accumulated += str(maybe_obj.get("text", ""))
-        elif isinstance(maybe_obj, dict) and maybe_obj.get("type") == "final":
-            if maybe_obj.get("text"):
-                accumulated = str(maybe_obj.get("text"))
+
+        if isinstance(maybe_obj, dict):
+            if maybe_obj.get("type") == "token":
+                accumulated += str(maybe_obj.get("text", ""))
+            elif maybe_obj.get("type") == "final":
+                if maybe_obj.get("text"):
+                    accumulated = str(maybe_obj.get("text"))
+                # Check if the final response includes Slack blocks
+                if maybe_obj.get("blocks"):
+                    accumulated_blocks = maybe_obj.get("blocks")
+            # Check if any chunk includes Slack blocks (for MCP responses)
+            elif maybe_obj.get("blocks"):
+                accumulated_blocks = maybe_obj.get("blocks")
         else:
             accumulated += str(chunk)
 
         if ts:
-            _slack_api(
-                "chat.update",
-                bot_token,
-                {"channel": channel_id, "ts": ts, "text": accumulated},
-            )
+            # Prepare the update payload
+            update_payload = {"channel": channel_id, "ts": ts}
+
+            # If we have blocks, use them for rich formatting
+            if accumulated_blocks:
+                update_payload["blocks"] = accumulated_blocks
+                # Also include text as fallback
+                update_payload["text"] = accumulated
+            else:
+                # Fallback to text-only
+                update_payload["text"] = accumulated
+
+            _slack_api("chat.update", bot_token, update_payload)
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Entry point for API Gateway → Lambda proxy requests.
 
     Dispatches based on HTTP method and rawPath to the appropriate handler.
@@ -367,14 +452,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if method == "POST" and raw_path.endswith("/events"):
         return events_handler(event, context)
     # Async worker entry (internal)
-    if (event.get("worker") is True) or (method == "POST" and raw_path.endswith("/events/worker")):
+    if (event.get("worker") is True) or (
+        method == "POST" and raw_path.endswith("/events/worker")
+    ):
         try:
-            _worker_stream_handler(event.get("body") if raw_path.endswith("/events/worker") else event)
+            _worker_stream_handler(
+                event.get("body") if raw_path.endswith("/events/worker") else event
+            )
         except Exception:
             pass
         return {"statusCode": 200, "body": json.dumps({"ok": True})}
 
-    return {"statusCode": 404, "body": json.dumps({"error": "not found", "path": raw_path, "method": method})}
+    return {
+        "statusCode": 404,
+        "body": json.dumps({"error": "not found", "path": raw_path, "method": method}),
+    }
 
 
 async def invoke_mcp_client(action_text: str):

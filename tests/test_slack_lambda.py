@@ -26,7 +26,11 @@ def test_url_verification(mock_get_secret_json: MagicMock) -> None:
 def test_oauth_flow(mock_get_secret_json: MagicMock, mock_post: MagicMock) -> None:
     os.environ["SLACK_SECRETS_NAME"] = "slack/creds"
     os.environ["AWS_REGION"] = "us-east-1"
-    mock_get_secret_json.return_value = {"client_id": "id", "client_secret": "sec", "redirect_uri": "https://x/cb"}
+    mock_get_secret_json.return_value = {
+        "client_id": "id",
+        "client_secret": "sec",
+        "redirect_uri": "https://x/cb",
+    }
     mock_post.return_value.json.return_value = {"ok": True, "access_token": "xoxb-1"}
 
     with patch("boto3.client") as mock_boto:
@@ -56,7 +60,9 @@ def test_events_handler_posts_initial_message(
     # Dynamo mock table
     table = MagicMock()
     mock_dynamo_resource.return_value.Table.return_value = table
-    table.get_item.return_value = {"Item": {"thread_key": "C1:1.0", "session_id": "s-1"}}
+    table.get_item.return_value = {
+        "Item": {"thread_key": "C1:1.0", "session_id": "s-1"}
+    }
 
     # Slack API responses
     def _post_side_effect(url: str, *args, **kwargs):
@@ -76,14 +82,23 @@ def test_events_handler_posts_initial_message(
     mock_requests_post.side_effect = _post_side_effect
 
     # Stream yields a couple tokens and then final
-    mock_stream.return_value = iter(["hello ", json.dumps({"type": "final", "text": "world"})])
+    mock_stream.return_value = iter(
+        ["hello ", json.dumps({"type": "final", "text": "world"})]
+    )
 
     event = {
         "headers": {},
-        "body": json.dumps({
-            "type": "event_callback",
-            "event": {"type": "message", "channel": "C1", "ts": "1.0", "text": "hi"},
-        }),
+        "body": json.dumps(
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "ts": "1.0",
+                    "text": "hi",
+                },
+            }
+        ),
     }
 
     resp = events_handler(event, None)
@@ -112,7 +127,9 @@ def test_events_handler_dedup_on_retry(
 
     table = MagicMock()
     mock_dynamo_resource.return_value.Table.return_value = table
-    table.get_item.return_value = {"Item": {"thread_key": "C1:3.0", "session_id": "s-3"}}
+    table.get_item.return_value = {
+        "Item": {"thread_key": "C1:3.0", "session_id": "s-3"}
+    }
 
     def _post_side_effect(url: str, *args, **kwargs):
         response = MagicMock()
@@ -123,7 +140,9 @@ def test_events_handler_dedup_on_retry(
         return response
 
     mock_requests_post.side_effect = _post_side_effect
-    mock_stream.return_value = iter(["hi ", "there", json.dumps({"type": "final", "text": "!"})])
+    mock_stream.return_value = iter(
+        ["hi ", "there", json.dumps({"type": "final", "text": "!"})]
+    )
 
     base_body = {
         "type": "event_callback",
@@ -167,7 +186,9 @@ def test_app_mention_posts_initial_message(
 
     table = MagicMock()
     mock_dynamo_resource.return_value.Table.return_value = table
-    table.get_item.return_value = {"Item": {"thread_key": "C1:2.0", "session_id": "s-2"}}
+    table.get_item.return_value = {
+        "Item": {"thread_key": "C1:2.0", "session_id": "s-2"}
+    }
 
     def _post_side_effect(url: str, *args, **kwargs):
         response = MagicMock()
@@ -182,14 +203,20 @@ def test_app_mention_posts_initial_message(
 
     event = {
         "headers": {},
-        "body": json.dumps({
-            "type": "event_callback",
-            "event": {"type": "app_mention", "channel": "C1", "ts": "2.0", "text": "<@U123> help"},
-        }),
+        "body": json.dumps(
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "app_mention",
+                    "channel": "C1",
+                    "ts": "2.0",
+                    "text": "<@U123> help",
+                },
+            }
+        ),
     }
 
     resp = events_handler(event, None)
     assert resp["statusCode"] == 200
     called_urls = [call.args[0] for call in mock_requests_post.mock_calls if call.args]
     assert any(url.endswith("chat.postMessage") for url in called_urls)
-

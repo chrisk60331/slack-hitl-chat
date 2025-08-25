@@ -24,13 +24,30 @@ agentcore_marketplace/
 │   ├── __init__.py
 │   ├── approval_handler.py        # Lambda function handler
 │   ├── execute_handler.py         # MCP execution handler
-│   ├── google_admin/              # Google Workspace MCP integration
+│   ├── google_admin/              # Google Workspace Admin MCP integration
 │   │   ├── config/                # Google API configuration
 │   │   ├── models/                # Request/response models
 │   │   ├── services/              # Business logic
 │   │   ├── repositories/          # Google API client
 │   │   ├── utils/                 # Helper utilities
 │   │   └── mcp_server.py          # FastMCP server implementation
+│   ├── google_calendar/           # Google Calendar MCP integration
+│   │   ├── manifest.json          # MCP server manifest
+│   │   ├── mcp_server.py          # Calendar MCP server
+│   │   ├── models.py              # Calendar data models
+│   │   └── service.py             # Calendar service logic
+│   ├── gdrive_mcp/                # Google Drive MCP integration
+│   │   ├── manifest.json          # MCP server manifest
+│   │   ├── mcp_server.py          # Drive MCP server
+│   │   ├── models.py              # Drive data models
+│   │   ├── service.py             # Drive service logic
+│   │   └── drive_client.py        # Drive API client
+│   └── gif_mcp/                   # GIF MCP integration
+│       ├── manifest.json          # MCP server manifest
+│       ├── mcp_server.py          # GIF MCP server
+│       ├── models.py              # GIF data models
+│       ├── service.py             # GIF service logic
+│       └── example_usage.py       # Usage examples
 ├── terraform/                     # Infrastructure as Code
 │   ├── bootstrap/                 # Remote state backend setup
 │   │   ├── main.tf
@@ -50,6 +67,8 @@ agentcore_marketplace/
 │   └── scripts/                   # Deployment automation
 │       └── deploy.sh
 ├── tests/                         # Unit tests
+├── jira_mcp/                      # JIRA MCP integration
+│   └── server.py                  # JIRA MCP server with modern API support
 ├── Dockerfile                     # Container definition
 ├── pyproject.toml                # Python project configuration
 └── README.md
@@ -86,6 +105,31 @@ terraform/scripts/deploy.sh dev plan
 
 # Apply development deployment
 terraform/scripts/deploy.sh dev apply
+## 🔧 Recent Fixes
+
+### JIRA MCP Server - Fixed Deprecated API Issue
+
+The JIRA MCP server has been updated to fix the broken `delete_project_issues` functionality. The issue was caused by JIRA deprecating their old search API endpoint.
+
+**What was fixed:**
+- Updated from deprecated GET-based search API to modern POST-based search API
+- Added proper error handling for deprecated API responses (HTTP 410)
+- Implemented fallback mechanisms for API failures
+- Added comprehensive logging for debugging
+- Enhanced error messages with specific JIRA API deprecation details
+
+**Technical changes:**
+- Updated to use the modern `/rest/api/3/search/jql` endpoint instead of deprecated `/rest/api/3/search`
+- Changed primary search method to `GET` with query parameters (more reliable)
+- Added `POST` with JSON body as fallback method
+- Added proper HTTP headers for modern JIRA API
+- Implemented multiple fallback strategies for search failures (GET → POST → project verification)
+- Added specific error handling for HTTP 410 (Gone), 400 (Bad Request), and 404 (Not Found) responses
+- Enhanced JIRA client configuration with modern API settings
+
+**Files modified:**
+- `jira_mcp/server.py` - Main server implementation with modern API support
+
 ## 🤖 Slack App Integration
 
 This repo includes a Slack App integration that connects Slack conversations to the AgentCore Gateway.
@@ -288,6 +332,189 @@ docker run -p 9000:8080 agentcore-hitl-approval
 - Environment-specific resource isolation
 - Encrypted data at rest and in transit
 
+## 🌐 Google MCP Integrations
+
+This project includes comprehensive Google Workspace MCP (Model Context Protocol) integrations for seamless AI agent interactions with Google services.
+
+### Google Admin MCP
+
+Provides administrative capabilities for Google Workspace domains:
+
+- **User Management**: Create, list, get, suspend/unsuspend users
+- **Role Management**: Add/remove AWS roles from user profiles
+- **Domain Operations**: List users by domain with filtering and ordering
+
+**Tools Available:**
+- `list_users` - List users in a domain
+- `add_user` - Create new users
+- `get_user` - Get detailed user information
+- `suspend_user` / `unsuspend_user` - Manage user accounts
+- `get_amazon_roles` - Retrieve AWS roles from user profiles
+- `add_amazon_role` / `remove_amazon_role` - Manage AWS role assignments
+
+### Google Calendar MCP
+
+Enables calendar management and scheduling operations:
+
+- **Event Management**: Create, read, update, delete calendar events
+- **Calendar Operations**: List calendars, manage availability
+- **Scheduling**: Handle recurring events and timezone conversions
+
+### Google Drive MCP
+
+#### Search query behavior
+
+The `search_documents` tool now interprets the free-text `query` using Drive v3 fields:
+
+- It builds `(name contains 'QUERY' or fullText contains 'QUERY') and trashed=false` by default
+- When `file_types` are provided, they are appended as an `or` group of `mimeType` filters
+- `owner` adds a `'owner@example.com' in owners` filter
+- `include_shared=False` adds `'me' in owners`
+
+Single quotes in `query` are escaped for the Drive query syntax.
+
+Comprehensive document and file management capabilities:
+
+- **Document Search**: Advanced search with file type filtering, owner filtering, and shared document inclusion
+- **Document Creation**: Create Google Docs, Sheets, Slides, and folders
+- **Document Management**: Get, update, and delete documents with permission management
+- **Folder Operations**: List and navigate folder structures
+
+**Tools Available:**
+- `search_documents` - Search for documents using various criteria
+- `create_document` - Create new documents, spreadsheets, presentations, or folders
+- `get_document` - Retrieve document metadata and optional content
+- `update_document` - Update document properties and content
+- `delete_document` - Delete documents or move to trash
+- `list_folders` - List folders with optional parent folder filtering
+- `list_drives` - List shared drives accessible to the service account (optional name filter)
+- `copy_document` - Copy a document/file, optionally rename and place into a destination folder
+
+#### Updating Google Docs Content
+
+The `update_document` tool supports updating the title, permissions, and the full text content of Google Docs. Content updates require the Google Docs API.
+
+- Ensure your OAuth scopes include:
+  - `https://www.googleapis.com/auth/drive`
+  - `https://www.googleapis.com/auth/drive.file`
+  - `https://www.googleapis.com/auth/documents`
+
+If content updates appear to succeed but no changes are visible in the Doc, verify that the Docs scope is granted to the service account and domain-wide delegation (if used) includes this scope. You can list granted scopes via:
+
+```bash
+uv run python google_mcp/google_admin/list_scopes.py
+```
+
+**Supported Document Types:**
+- Google Docs (`document`)
+- Google Sheets (`spreadsheet`) 
+- Google Slides (`presentation`)
+- Folders (`folder`)
+- PDF files (`pdf`)
+
+**Search Capabilities:**
+- Full-text search across document names and content
+- File type filtering (document, spreadsheet, presentation, folder, pdf)
+- Owner-based filtering
+- Shared document inclusion/exclusion
+- Configurable result limits
+
+**Permission Management:**
+- Share documents with specific users
+- Set read/write/owner permissions
+- Manage access control lists
+
+**Shared Drives:**
+- List shared drives your service account can access
+- Optional name filter matched with `name contains 'QUERY'`
+
+#### Customer Files Tool
+
+Adds a tool to list files inside a customer-specific folder structure.
+
+- Env var required: `GDRIVE_CUSTOMER_FOLDER_ID` = ID of the root customer folder
+- Expected structure under the root: `/<LETTER>/<CUSTOMER_NAME>/...`
+
+Tool: `list_customer_files`
+
+Inputs:
+- `customer_name` (string, required): Folder name of the customer.
+- `recursive` (bool, default false): Include files in all subfolders.
+- `max_results` (int, default 100): Maximum files to return.
+- `include_shared` (bool, default true): Include files not owned by the service account.
+
+Example:
+```python
+list_customer_files({
+    "customer_name": "Acme Corp",
+    "recursive": true,
+    "max_results": 200
+})
+```
+
+### Configuration
+
+All Google MCP servers use the same authentication configuration:
+
+```bash
+# Required environment variables
+GOOGLE_TYPE=service_account
+GOOGLE_PROJECT_ID=your-project-id
+GOOGLE_PRIVATE_KEY_ID=your-private-key-id
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GOOGLE_CLIENT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
+GOOGLE_TOKEN_URI=https://oauth2.googleapis.com/token
+GOOGLE_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+GOOGLE_CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com
+GOOGLE_UNIVERSE_DOMAIN=googleapis.com
+GOOGLE_ADMIN_EMAIL=admin@yourdomain.com
+```
+
+### Usage Examples
+
+**Search for documents:**
+```python
+# Search for all documents containing "project plan"
+search_documents({
+    "query": "project plan",
+    "file_types": ["document", "spreadsheet"],
+    "max_results": 20
+})
+```
+
+**Create a new document:**
+```python
+# Create a Google Doc with initial content
+create_document({
+    "title": "Meeting Notes",
+    "document_type": "document",
+    "content": "Agenda:\n1. Project updates\n2. Next steps",
+    "permissions": ["team@example.com"]
+})
+```
+
+**List folders:**
+```python
+# List root folders
+list_folders({
+    "max_results": 50,
+    "include_shared": True
+})
+```
+
+**Copy a document:**
+```python
+# Copy a document to a folder with a new name
+copy_document({
+    "source_document_id": "1AbcSrcId",
+    "new_title": "Copied - Meeting Notes",
+    "destination_folder_id": "1FolderId",
+    "permissions": ["collab@example.com"]
+})
+```
+
 ### Network Security
 
 - Private subnets for Lambda functions
@@ -309,6 +536,27 @@ public_subnet_ids = ["subnet-aaaaaaaaa", "subnet-bbbbbbbbb"]
 lambda_security_group_id = "sg-xxxxxxxxx"
 app_security_group_id = "sg-yyyyyyyyy"
 alb_security_group_id = "sg-zzzzzzzzz"
+```
+
+### Google Admin: List Granted Scopes
+
+Use the helper script to print the OAuth scopes granted to the configured Google Admin service account:
+
+```bash
+uv run python google_mcp/google_admin/list_scopes.py
+```
+
+Expected output (example):
+
+```text
+Granted scopes:
+- https://www.googleapis.com/auth/admin.directory.group
+- https://www.googleapis.com/auth/admin.directory.rolemanagement
+- https://www.googleapis.com/auth/admin.directory.user
+- https://www.googleapis.com/auth/drive
+- https://www.googleapis.com/auth/drive.file
+- https://www.googleapis.com/auth/drive.metadata.readonly
+- https://www.googleapis.com/auth/drive.readonly
 ```
 
 ### Multi-Region Deployment
@@ -555,6 +803,8 @@ uv run hitl-mcp run \
 This repo includes a simple Jira MCP server at `jira_mcp/server.py` exposing:
 - `create_project`
 - `bulk_issue_upload`
+- `delete_project_issues` - Delete issues in a JIRA project (with modern API support)
+- `delete_project` - Delete an entire JIRA project (deletes all issues first, then the project)
 
 Required environment variables for Jira access:
 

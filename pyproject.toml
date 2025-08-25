@@ -35,6 +35,8 @@ dependencies = [
     "watchfiles>=1.0.5",
     "fastapi-azure-auth>=5.1.1",
     "pydantic-ai>=0.0.12",
+    # GIF MCP dependencies
+    "pillow>=10.0.0",  # For image processing if needed
 ]
 
 [project.optional-dependencies]
@@ -140,3 +142,8 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_return_any = true
 strict_equality = true 
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.7",
+]

@@ -6,12 +6,11 @@ import os
 import struct
 import time
 from hashlib import sha1
-from typing import Any, Dict, Optional
+from typing import Any
 
 import boto3
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
-
 
 mcp = FastMCP(
     "TOTP MCP Server",
@@ -39,7 +38,7 @@ class GetTotpCodeRequest(BaseModel):
     key_field: str = Field(default="secret")
     period: int = Field(default=30, ge=15, le=120)
     digits: int = Field(default=6, ge=6, le=10)
-    secret_region: Optional[str] = Field(default=None)
+    secret_region: str | None = Field(default=None)
 
 
 def _base32_decode_no_padding(data: str) -> bytes:
@@ -72,11 +71,13 @@ def _hotp(secret: bytes, counter: int, digits: int) -> str:
         | ((hmac_digest[offset + 2] & 0xFF) << 8)
         | (hmac_digest[offset + 3] & 0xFF)
     )
-    hotp_value = code % (10 ** digits)
+    hotp_value = code % (10**digits)
     return str(hotp_value).zfill(digits)
 
 
-def _totp_from_base32(base32_secret: str, period: int, digits: int, now: Optional[int] = None) -> str:
+def _totp_from_base32(
+    base32_secret: str, period: int, digits: int, now: int | None = None
+) -> str:
     """Generate a TOTP code from a base32 secret.
 
     Args:
@@ -91,12 +92,12 @@ def _totp_from_base32(base32_secret: str, period: int, digits: int, now: Optiona
     return _hotp(secret_bytes, counter, digits)
 
 
-def _get_secret_value(secret_name: str, region: Optional[str]) -> str:
+def _get_secret_value(secret_name: str, region: str | None) -> str:
     """Fetch a secret string from AWS Secrets Manager.
 
     Returns SecretString when present, otherwise returns base64 of SecretBinary.
     """
-    client_kwargs: Dict[str, Any] = {}
+    client_kwargs: dict[str, Any] = {}
     if region:
         client_kwargs["region_name"] = region
     elif os.environ.get("AWS_REGION"):
@@ -126,7 +127,7 @@ def _extract_base32_secret(secret_value: str, key_field: str) -> str:
     name="get_totp_code",
     description="Fetch a TOTP base32 secret from AWS Secrets Manager and return the current code.",
 )
-def get_totp_code(request: GetTotpCodeRequest) -> Dict[str, str]:
+def get_totp_code(request: GetTotpCodeRequest) -> dict[str, str]:
     """Return the current TOTP code for the secret in Secrets Manager."""
     secret_value = _get_secret_value(request.secret_name, request.secret_region)
     base32_secret = _extract_base32_secret(secret_value, request.key_field)
@@ -138,7 +139,7 @@ def get_totp_code(request: GetTotpCodeRequest) -> Dict[str, str]:
     name="generate_totp_code",
     description="Generate the current code.",
 )
-def generate_totp_code(secret_value) -> Dict[str, str]:
+def generate_totp_code(secret_value) -> dict[str, str]:
     """Return the current TOTP code for secret_value."""
     base32_secret = _extract_base32_secret(secret_value, secret_value)
     code = _totp_from_base32(base32_secret, 30, 6)
@@ -147,5 +148,3 @@ def generate_totp_code(secret_value) -> Dict[str, str]:
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
-
-

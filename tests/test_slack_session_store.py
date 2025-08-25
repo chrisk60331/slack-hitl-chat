@@ -13,7 +13,9 @@ def test_put_and_get_session_id(mock_resource: MagicMock) -> None:
     mock_resource.return_value.Table.return_value = table
 
     # Simulate get_item result after put
-    table.get_item.return_value = {"Item": {"thread_key": "C:1.1", "session_id": "s-123"}}
+    table.get_item.return_value = {
+        "Item": {"thread_key": "C:1.1", "session_id": "s-123"}
+    }
 
     store = SlackSessionStore()
     store.put_session_id("C", "1.1", "s-123", ttl_seconds=10)
@@ -27,5 +29,3 @@ def test_requires_env() -> None:
     os.environ.pop("SLACK_SESSIONS_TABLE", None)
     with pytest.raises(ValueError):
         SlackSessionStore()
-
-

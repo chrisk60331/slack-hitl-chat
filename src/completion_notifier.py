@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import boto3
 
@@ -50,23 +50,20 @@ def _extract_text_from_result(result_obj: Any) -> str:
         return str(result_obj)[:3000]
 
 
-def lambda_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
+def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     """Entry point for Lambda proxy from Step Functions.
 
     Args:
         event: Expected to contain 'request_id' and 'result'. Tolerates variations.
     """
     # Resolve execution context
-    request_id: Optional[str] = (
+    request_id: str | None = (
         event.get("request_id")
         or event.get("Input", {}).get("request_id")
         or event.get("body", {}).get("request_id")
     )
     result_obj: Any = (
-        event.get("result")
-        or event.get("execute_result")
-        or event.get("body")
-        or event
+        event.get("result") or event.get("execute_result") or event.get("body") or event
     )
 
     if not request_id:
@@ -92,8 +89,8 @@ def lambda_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
     except Exception:
         item = {}
 
-    channel_id: Optional[str] = item.get("slack_channel") or item.get("channel_id")
-    ts: Optional[str] = item.get("slack_ts") or item.get("ts")
+    channel_id: str | None = item.get("slack_channel") or item.get("channel_id")
+    ts: str | None = item.get("slack_ts") or item.get("ts")
 
     if not channel_id or not ts:
         # No Slack metadata to update; consider success
@@ -126,5 +123,3 @@ def lambda_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
     )
 
     return {"statusCode": 200, "body": {"ok": True, "updated": True}}
-
-

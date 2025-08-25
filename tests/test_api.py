@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import pytest
-import httpx
 import time
-from httpx import AsyncClient
+
+import httpx
+import pytest
 
 from src.api import app
 
 
 def _sign_slack_request(signing_secret: str, body: bytes, timestamp: str) -> str:
-    import hmac, hashlib
-    basestring = f"v0:{timestamp}:{body.decode('utf-8')}".encode('utf-8')
-    digest = hmac.new(signing_secret.encode('utf-8'), basestring, hashlib.sha256).hexdigest()
+    import hashlib
+    import hmac
+
+    basestring = f"v0:{timestamp}:{body.decode('utf-8')}".encode()
+    digest = hmac.new(
+        signing_secret.encode("utf-8"), basestring, hashlib.sha256
+    ).hexdigest()
     return f"v0={digest}"
 
 
@@ -50,13 +54,14 @@ async def test_slack_interactions_happy_path(monkeypatch: pytest.MonkeyPatch) ->
         "actions": [
             {
                 "action_id": "approve",
-                "value": "{\"request_id\":\"req-123\",\"action\":\"approve\"}",
+                "value": '{"request_id":"req-123","action":"approve"}',
             }
         ],
         "response_url": "https://example.com/response",
     }
     import json as _json
-    form_body = f"payload={_json.dumps(payload)}".encode("utf-8")
+
+    form_body = f"payload={_json.dumps(payload)}".encode()
     ts = str(int(time.time()))
     secret = "testsecret"
     sig = _sign_slack_request(secret, form_body, ts)
@@ -80,6 +85,7 @@ async def test_slack_interactions_happy_path(monkeypatch: pytest.MonkeyPatch) ->
 
     from src import approval_handler as ah
     from src import slack_helper as sh
+
     monkeypatch.setattr(ah, "_handle_approval_decision", fake_handle)
     monkeypatch.setattr(sh.requests, "post", fake_post)
 
@@ -98,5 +104,3 @@ async def test_slack_interactions_happy_path(monkeypatch: pytest.MonkeyPatch) ->
         assert resp.json().get("status") == "ok"
         assert called["dec"] is True
         assert called["resp"] is True
-
-

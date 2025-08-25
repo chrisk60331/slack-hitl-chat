@@ -10,6 +10,3 @@ def test_readme_mcp_servers_example_includes_calendar_and_allows_totp(monkeypatc
     )
     monkeypatch.setenv("MCP_SERVERS", example)
     assert "totp=/abs/path/totp_mcp/mcp_server.py" in os.environ["MCP_SERVERS"]
-
-
-

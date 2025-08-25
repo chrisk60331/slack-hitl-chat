@@ -1,4 +1,1 @@
 """Jira MCP package."""
-
-
-

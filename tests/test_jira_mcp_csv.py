@@ -1,15 +1,17 @@
 import polars as pl
 
-from jira_mcp.server import _rows_to_issues, _resolve_project_template_key
+from jira_mcp.server import _resolve_project_template_key, _rows_to_issues
 
 
 def test_rows_to_issues_basic():
-    df = pl.DataFrame({
-        "Summary": ["Task A", "Task B"],
-        "IssueType": ["Task", "Task"],
-        "Description": ["Desc A", "Desc B"],
-        "Labels": ["one,two", None],
-    })
+    df = pl.DataFrame(
+        {
+            "Summary": ["Task A", "Task B"],
+            "IssueType": ["Task", "Task"],
+            "Description": ["Desc A", "Desc B"],
+            "Labels": ["one,two", None],
+        }
+    )
     issues = _rows_to_issues(df, {}, {})
     assert len(issues) == 2
     assert issues[0]["fields"]["summary"] == "Task A"
@@ -22,12 +24,14 @@ def test_rows_to_issues_basic():
 
 def test_rows_to_issues_header_whitespace_and_ticket_type_aliases():
     # Headers contain trailing spaces and only Kanban/Scrum columns for type
-    df = pl.DataFrame({
-        "Summary ": ["Story X"],
-        "Ticket Type for Kanban": ["Task"],
-        "Acceptance Criteria/ What we need to do": ["AC 1"],
-        "Description": ["Body"],
-    })
+    df = pl.DataFrame(
+        {
+            "Summary ": ["Story X"],
+            "Ticket Type for Kanban": ["Task"],
+            "Acceptance Criteria/ What we need to do": ["AC 1"],
+            "Description": ["Body"],
+        }
+    )
     issues = _rows_to_issues(df, {}, {})
     assert len(issues) == 1
     fields = issues[0]["fields"]
@@ -46,25 +50,39 @@ def test_rows_to_issues_header_whitespace_and_ticket_type_aliases():
 
 
 def test_rows_to_issues_prefers_scrum_over_kanban_when_both_present():
-    df = pl.DataFrame({
-        "Summary": ["Mixed Type"],
-        "Ticket Type for Scrum": ["Story"],
-        "Ticket Type for Kanban": ["Task"],
-    })
+    df = pl.DataFrame(
+        {
+            "Summary": ["Mixed Type"],
+            "Ticket Type for Scrum": ["Story"],
+            "Ticket Type for Kanban": ["Task"],
+        }
+    )
     issues = _rows_to_issues(df, {}, {})
     assert len(issues) == 1
     assert issues[0]["fields"]["issuetype"]["name"] == "Story"
 
 
 def test_resolve_project_template_key_aliases():
-    assert _resolve_project_template_key("scrum") == "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum"
-    assert _resolve_project_template_key("kanban") == "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban"
-    assert _resolve_project_template_key("scrum-classic") == "com.pyxis.greenhopper.jira:gh-simplified-scrum-classic"
-    assert _resolve_project_template_key("kanban-classic") == "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic"
-    assert _resolve_project_template_key("basic") == "com.pyxis.greenhopper.jira:gh-simplified-basic"
+    assert (
+        _resolve_project_template_key("scrum")
+        == "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum"
+    )
+    assert (
+        _resolve_project_template_key("kanban")
+        == "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban"
+    )
+    assert (
+        _resolve_project_template_key("scrum-classic")
+        == "com.pyxis.greenhopper.jira:gh-simplified-scrum-classic"
+    )
+    assert (
+        _resolve_project_template_key("kanban-classic")
+        == "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic"
+    )
+    assert (
+        _resolve_project_template_key("basic")
+        == "com.pyxis.greenhopper.jira:gh-simplified-basic"
+    )
     # Passthrough full keys
     full = "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban"
     assert _resolve_project_template_key(full) == full
-
-
-

@@ -1,8 +1,6 @@
-import asyncio
-import json
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from src.api import app
 
@@ -18,12 +16,18 @@ async def test_create_session_and_post_and_stream() -> None:
         session_id = r.json()["session_id"]
 
         # post message
-        r = await ac.post(f"/gateway/v1/sessions/{session_id}/messages", json={"query": "hello", "user_id": "u"})
+        r = await ac.post(
+            f"/gateway/v1/sessions/{session_id}/messages",
+            json={"query": "hello", "user_id": "u"},
+        )
         assert r.status_code == 200
         message_id = r.json()["message_id"]
 
         # start stream (consume a few events)
-        r = await ac.get(f"/gateway/v1/sessions/{session_id}/stream?cursor={message_id}", timeout=None)
+        r = await ac.get(
+            f"/gateway/v1/sessions/{session_id}/stream?cursor={message_id}",
+            timeout=None,
+        )
         assert r.status_code == 200
         # SSE payload comes as a byte stream. For unit test, ensure we can iterate some bytes.
         # httpx returns an async stream; read small chunk to verify it's producing.
@@ -33,5 +37,3 @@ async def test_create_session_and_post_and_stream() -> None:
             if len(content) > 0:
                 break
         assert len(content) > 0
-
-

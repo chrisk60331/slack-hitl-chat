@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any
 
 import boto3
 
@@ -25,7 +25,11 @@ def _get_secrets_client() -> Any:
     Returns:
         Boto3 Secrets Manager client bound to AWS_REGION.
     """
-    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+    region = (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "us-east-1"
+    )
     return boto3.client("secretsmanager", region_name=region)
 
 
@@ -49,7 +53,7 @@ def get_secret_string(secret_name: str) -> str:
 
 
 @lru_cache(maxsize=256)
-def get_secret_json(secret_name: str) -> Dict[str, Any]:
+def get_secret_json(secret_name: str) -> dict[str, Any]:
     """Fetch and parse a JSON secret by name.
 
     Args:
@@ -84,7 +88,7 @@ def put_secret_string(secret_name: str, value: str) -> None:
         client.create_secret(Name=secret_name, SecretString=value)
 
 
-def put_secret_json(secret_name: str, payload: Dict[str, Any]) -> None:
+def put_secret_json(secret_name: str, payload: dict[str, Any]) -> None:
     """Create or update a JSON secret.
 
     Args:
@@ -92,5 +96,3 @@ def put_secret_json(secret_name: str, payload: Dict[str, Any]) -> None:
         payload: JSON-serializable dict to store.
     """
     put_secret_string(secret_name, json.dumps(payload))
-
-

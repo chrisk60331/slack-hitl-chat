@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict
 from unittest.mock import Mock, patch
 
 from src.slack_helper import post_slack_webhook_message
@@ -15,7 +14,7 @@ def test_post_slack_webhook_message_basic(mock_post: Mock) -> None:
     mock_post.return_value.status_code = 200
     mock_post.return_value.text = "ok"
 
-    content: Dict[str, str] = {
+    content: dict[str, str] = {
         "title": "AgentCore HITL Pending Approval",
         "request_id": "req-1",
         "status": "approve",
@@ -36,7 +35,7 @@ def test_post_slack_webhook_message_basic(mock_post: Mock) -> None:
 
 @patch("src.slack_helper.requests.post")
 def test_post_slack_webhook_message_no_webhook(mock_post: Mock) -> None:
-    content: Dict[str, str] = {
+    content: dict[str, str] = {
         "title": "t",
         "request_id": "r",
         "status": "approve",
@@ -58,7 +57,7 @@ def test_post_slack_webhook_message_pending_includes_links(mock_post: Mock) -> N
     mock_post.return_value.status_code = 200
     mock_post.return_value.text = "ok"
 
-    content: Dict[str, str] = {
+    content: dict[str, str] = {
         "title": "AgentCore HITL Pending Approval",
         "request_id": "req-2",
         "status": "pending",
@@ -79,5 +78,3 @@ def test_post_slack_webhook_message_pending_includes_links(mock_post: Mock) -> N
         text = kwargs["json"]["text"]
         assert "Approve: https://lambda-url?request_id=req-2&action=approve" in text
         assert "Reject: https://lambda-url?request_id=req-2&action=reject" in text
-
-

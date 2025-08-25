@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -31,15 +31,19 @@ class ApprovalCategory(str, Enum):
 
     USER_ACCOUNT_ACCESS = "user_account_access"
     AWS_ROLE_ACCESS = "aws_role_access"
+    DOCUMENT_ACCESS_UPDATES = "non_sow_document_access"
+    DOCUMENT_CONTENT_UPDATES = "document_content_updates"
     OTHER = "other"
 
     @property
     def risk_default(self) -> int:
         """Default risk weight for the category (1-10)."""
 
-        risk_map: Dict[ApprovalCategory, int] = {
+        risk_map: dict[ApprovalCategory, int] = {
             ApprovalCategory.USER_ACCOUNT_ACCESS: 10,
             ApprovalCategory.AWS_ROLE_ACCESS: 8,
+            ApprovalCategory.DOCUMENT_ACCESS_UPDATES: 10,
+            ApprovalCategory.DOCUMENT_CONTENT_UPDATES: 5    ,
             ApprovalCategory.OTHER: 3,
         }
         return risk_map[self]
@@ -57,29 +61,32 @@ class ProposedAction(BaseModel):
     """Structured description of a user/tool action to be executed."""
 
     tool_name: str = Field(..., description="The name of the tool or operation")
-    description: str = Field(..., description="Human-readable description of the intended action")
+    description: str = Field(
+        ..., description="Human-readable description of the intended action"
+    )
     category: ApprovalCategory = Field(default=ApprovalCategory.OTHER)
-    resource: Optional[str] = Field(
+    resource: str | None = Field(
         default=None, description="Target resource identifier (ARN, URL, path)"
     )
-    amount: Optional[float] = Field(
-        default=None, description="Monetary amount or numeric threshold relevant to the action"
+    amount: float | None = Field(
+        default=None,
+        description="Monetary amount or numeric threshold relevant to the action",
     )
     environment: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT", "dev"))
-    user_id: Optional[str] = Field(default=None)
-    group_ids: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    user_id: str | None = Field(default=None)
+    group_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PolicyRule(BaseModel):
     """Deterministic policy rule definition."""
 
     name: str
-    categories: List[ApprovalCategory] = Field(default_factory=list)
-    environments: List[str] = Field(default_factory=list)
-    resource_prefixes: List[str] = Field(default_factory=list)
-    min_amount: Optional[float] = None
-    max_amount: Optional[float] = None
+    categories: list[ApprovalCategory] = Field(default_factory=list)
+    environments: list[str] = Field(default_factory=list)
+    resource_prefixes: list[str] = Field(default_factory=list)
+    min_amount: float | None = None
+    max_amount: float | None = None
     require_approval: bool = True
     deny: bool = False
 
@@ -104,16 +111,16 @@ class PolicyDecision(BaseModel):
     """Result of evaluating a ProposedAction against policy rules."""
 
     outcome: ApprovalOutcome
-    matched_rule: Optional[str] = None
+    matched_rule: str | None = None
     rationale: str = ""
 
 
 @dataclass(slots=True)
 class _RawPolicy:
-    rules: List[PolicyRule]
+    rules: list[PolicyRule]
 
 
-DEFAULT_RULES: List[PolicyRule] = [
+DEFAULT_RULES: list[PolicyRule] = [
     PolicyRule(
         name="require_approval_for_aws_role_access",
         categories=[ApprovalCategory.AWS_ROLE_ACCESS],
@@ -124,7 +131,16 @@ DEFAULT_RULES: List[PolicyRule] = [
         categories=[ApprovalCategory.USER_ACCOUNT_ACCESS],
         require_approval=True,
     ),
-
+    PolicyRule(
+        name="require_approval_for_document_access_updates",
+        categories=[ApprovalCategory.DOCUMENT_ACCESS_UPDATES],
+        require_approval=True,
+    ),
+    PolicyRule(
+        name="require_approval_for_document_edits_and_deletes",
+        categories=[ApprovalCategory.DOCUMENT_CONTENT_UPDATES],
+        require_approval=True,
+    ),
 ]
 
 
@@ -134,13 +150,13 @@ class PolicyEngine:
     Loads rules from POLICY_PATH if provided; otherwise uses DEFAULT_RULES.
     """
 
-    def __init__(self, policy_path: Optional[str] = None) -> None:
+    def __init__(self, policy_path: str | None = None) -> None:
         self._policy_path = policy_path or os.getenv("POLICY_PATH")
 
     @lru_cache(maxsize=1)
     def _load_rules(self) -> _RawPolicy:
         if self._policy_path and os.path.exists(self._policy_path):
-            with open(self._policy_path, "r", encoding="utf-8") as f:
+            with open(self._policy_path, encoding="utf-8") as f:
                 data = json.load(f)
             rules = [PolicyRule(**r) for r in data.get("rules", [])]
             return _RawPolicy(rules=rules)
@@ -179,12 +195,13 @@ class PolicyEngine:
         )
 
 
-
 # Compiled regex to detect AWS IAM Role ARNs in free-form text
 _AWS_ROLE_ARN_REGEX = re.compile(r"arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_/-]+")
 
 
-def infer_category_and_resource(description: str) -> tuple[ApprovalCategory, Optional[str]]:
+def infer_category_and_resource(
+    description: str,
+) -> tuple[ApprovalCategory, str | None]:
     """Infer an approval category and target resource from a natural language description.
 
     - Detects AWS IAM Role ARNs and returns (AWS_ROLE_ACCESS, role_arn)
@@ -200,4 +217,3 @@ def infer_category_and_resource(description: str) -> tuple[ApprovalCategory, Opt
     if match:
         return (ApprovalCategory.AWS_ROLE_ACCESS, match.group(0))
     return (ApprovalCategory.OTHER, None)
-

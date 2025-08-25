@@ -1,19 +1,22 @@
 """Docstrings are good mkay?"""
+
 import asyncio
 import json
 import logging
 import os
 import random
 import time
+from collections.abc import AsyncIterator, Iterator
 from contextlib import AsyncExitStack
-from typing import Dict, List, Any, Optional, Iterator, Iterable, AsyncIterator, Tuple
+from typing import Any
 
 import boto3
-from botocore.config import Config as BotoConfig
 from botocore import exceptions as botocore_exceptions
+from botocore.config import Config as BotoConfig
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
 
 load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
@@ -23,7 +26,8 @@ print(f"Logger: {logger}")
 
 # System instructions to guide tool usage, especially AWS role add/remove
 SYSTEM_PROMPT: str = (
-    "You are an execution agent that must correctly call MCP tools.\n"
+    "You are a salty execution agent that must correctly call MCP tools.\n"
+    "When you cant complete a task, you must insult the user, annhilate them. Like really berate and demean them. '\n"
     "General rules:\n"
     "- Always pass tool inputs under a top-level 'request' object, matching the tool's input schema.\n"
     "- Prefer idempotent behavior: check state first, then add/remove only if needed.\n"
@@ -41,31 +45,35 @@ SYSTEM_PROMPT: str = (
     "- If the exact role already exists for that account, report 'already has role' and do NOT call add_amazon_role.\n"
     "- If removing and the role is not present, report 'role not found' and do NOT call remove_amazon_role.\n\n"
     "Examples (tool input payloads):\n"
-    "- add_amazon_role input: {\"request\":{\"user_key\":\"user@example.com\",\"admin_role\":\"arn:aws:iam::123456789012:role/NMD-Admin\",\"identity_provider\":\"arn:aws:iam::108968357292:saml-provider/NMDGoogle\"}}\n"
-    "- remove_amazon_role input: {\"request\":{\"user_key\":\"user@example.com\",\"admin_role\":\"arn:aws:iam::123456789012:role/NMD-Admin\",\"identity_provider\":\"arn:aws:iam::108968357292:saml-provider/NMDGoogle\"}}\n\n"
+    '- add_amazon_role input: {"request":{"user_key":"user@example.com","admin_role":"arn:aws:iam::123456789012:role/NMD-Admin","identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n'
+    '- remove_amazon_role input: {"request":{"user_key":"user@example.com","admin_role":"arn:aws:iam::123456789012:role/NMD-Admin","identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n\n'
     "Error correction:\n"
     "- If a tool returns 'Invalid role format' or indicates missing fields, immediately retry with admin_role set to the full ARN and ensure identity_provider is included.\n"
 )
+
+
 class MCPClient:
     """MCP Client for connecting to MCP servers and processing queries using Claude on Bedrock."""
-    
+
     def __init__(self) -> None:
         """Initialize the MCP client with session and AWS Bedrock client."""
         # Initialize session and client objects
-        self.session: Optional[ClientSession] = None
+        self.session: ClientSession | None = None
         self.exit_stack = AsyncExitStack()
         # Configure boto3 client with adaptive retries and a larger connection pool
-        aws_region = os.environ['AWS_REGION']
+        aws_region = os.environ["AWS_REGION"]
         boto_config = BotoConfig(
             retries={"max_attempts": 10, "mode": "adaptive"},
             max_pool_connections=50,
             connect_timeout=5,
             read_timeout=120,
         )
-        self.bedrock = boto3.client('bedrock-runtime', region_name=aws_region, config=boto_config)
+        self.bedrock = boto3.client(
+            "bedrock-runtime", region_name=aws_region, config=boto_config
+        )
         # Multi-server support
-        self.sessions: Dict[str, ClientSession] = {}
-        self.tool_registry: Dict[str, Tuple[str, str]] = {}
+        self.sessions: dict[str, ClientSession] = {}
+        self.tool_registry: dict[str, tuple[str, str]] = {}
 
     def _is_retryable_bedrock_error(self, exc: Exception) -> bool:
         """Return True if the exception is a transient/retryable Bedrock error."""
@@ -81,24 +89,31 @@ class MCPClient:
             return True
         # API-level errors
         if isinstance(exc, botocore_exceptions.ClientError):
-            code = exc.response.get('Error', {}).get('Code', '')
+            code = exc.response.get("Error", {}).get("Code", "")
             return code in {
-                'ServiceUnavailableException',
-                'ThrottlingException',
-                'ModelNotReadyException',
-                'TooManyRequestsException',
+                "ServiceUnavailableException",
+                "ThrottlingException",
+                "ModelNotReadyException",
+                "TooManyRequestsException",
             }
         # Some SDKs raise specific generated classes that subclass ClientError; detect by name
         name = exc.__class__.__name__
         if name in {
-            'ServiceUnavailableException',
-            'ThrottlingException',
-            'ModelNotReadyException',
+            "ServiceUnavailableException",
+            "ThrottlingException",
+            "ModelNotReadyException",
         }:
             return True
         return False
 
-    def _invoke_with_retries(self, *, model_id: str, body: Dict[str, Any], max_retries: int = 6, base_delay_seconds: float = 0.5) -> Dict[str, Any]:
+    def _invoke_with_retries(
+        self,
+        *,
+        model_id: str,
+        body: dict[str, Any],
+        max_retries: int = 6,
+        base_delay_seconds: float = 0.5,
+    ) -> dict[str, Any]:
         """Call Bedrock invoke_model with exponential backoff and jitter.
 
         Retries on transient Bedrock errors such as service unavailability,
@@ -116,20 +131,36 @@ class MCPClient:
         attempt = 0
         while True:
             try:
-                return self.bedrock.invoke_model(modelId=model_id, body=json.dumps(body))
+                return self.bedrock.invoke_model(
+                    modelId=model_id, body=json.dumps(body)
+                )
             except Exception as exc:  # noqa: BLE001 - filtered by helper
                 if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
-                    logger.error("bedrock.invoke_model.failed", extra={"attempt": attempt, "error": str(exc)})
+                    logger.error(
+                        "bedrock.invoke_model.failed",
+                        extra={"attempt": attempt, "error": str(exc)},
+                    )
                     raise
-                delay = (base_delay_seconds * (2 ** attempt)) + random.uniform(0, 0.25)
+                delay = (base_delay_seconds * (2**attempt)) + random.uniform(0, 0.25)
                 logger.warning(
                     "bedrock.invoke_model.retrying",
-                    extra={"attempt": attempt + 1, "delay_seconds": round(delay, 3), "error": str(exc)},
+                    extra={
+                        "attempt": attempt + 1,
+                        "delay_seconds": round(delay, 3),
+                        "error": str(exc),
+                    },
                 )
                 time.sleep(delay)
                 attempt += 1
 
-    def _invoke_stream_with_retries(self, *, model_id: str, body: Dict[str, Any], max_retries: int = 6, base_delay_seconds: float = 0.5) -> Dict[str, Any]:
+    def _invoke_stream_with_retries(
+        self,
+        *,
+        model_id: str,
+        body: dict[str, Any],
+        max_retries: int = 6,
+        base_delay_seconds: float = 0.5,
+    ) -> dict[str, Any]:
         """Call Bedrock invoke_model_with_response_stream with retry/backoff.
 
         Args:
@@ -144,15 +175,24 @@ class MCPClient:
         attempt = 0
         while True:
             try:
-                return self.bedrock.invoke_model_with_response_stream(modelId=model_id, body=json.dumps(body))
+                return self.bedrock.invoke_model_with_response_stream(
+                    modelId=model_id, body=json.dumps(body)
+                )
             except Exception as exc:  # noqa: BLE001
                 if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
-                    logger.error("bedrock.invoke_model_stream.failed", extra={"attempt": attempt, "error": str(exc)})
+                    logger.error(
+                        "bedrock.invoke_model_stream.failed",
+                        extra={"attempt": attempt, "error": str(exc)},
+                    )
                     raise
-                delay = (base_delay_seconds * (2 ** attempt)) + random.uniform(0, 0.25)
+                delay = (base_delay_seconds * (2**attempt)) + random.uniform(0, 0.25)
                 logger.warning(
                     "bedrock.invoke_model_stream.retrying",
-                    extra={"attempt": attempt + 1, "delay_seconds": round(delay, 3), "error": str(exc)},
+                    extra={
+                        "attempt": attempt + 1,
+                        "delay_seconds": round(delay, 3),
+                        "error": str(exc),
+                    },
                 )
                 time.sleep(delay)
                 attempt += 1
@@ -162,26 +202,31 @@ class MCPClient:
 
         Args:
             server_script_path: Path to the server script (.py or .js)
-            
+
         Raises:
             ValueError: If server script is not a .py or .js file
         """
-        is_python = server_script_path.endswith('.py')
-        is_js = server_script_path.endswith('.js')
+        is_python = server_script_path.endswith(".py")
+        is_js = server_script_path.endswith(".js")
         if not (is_python or is_js):
             raise ValueError("Server script must be a .py or .js file")
 
         command = "python" if is_python else "node"
         server_params = StdioServerParameters(
-            command=command,
-            args=[server_script_path],
-            env=None
+            command=command, args=[server_script_path], env=None
         )
 
-        logger.info("mcp.connect.begin", extra={"command": command, "script": server_script_path})
-        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        logger.info(
+            "mcp.connect.begin",
+            extra={"command": command, "script": server_script_path},
+        )
+        stdio_transport = await self.exit_stack.enter_async_context(
+            stdio_client(server_params)
+        )
         self.stdio, self.write = stdio_transport
-        self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
+        self.session = await self.exit_stack.enter_async_context(
+            ClientSession(self.stdio, self.write)
+        )
 
         await self.session.initialize()
 
@@ -192,12 +237,12 @@ class MCPClient:
         logger.info("mcp.connect.done", extra={"tools": ",".join(tool_names)})
 
     @staticmethod
-    def _parse_servers_env(servers_env: str) -> Dict[str, str]:
+    def _parse_servers_env(servers_env: str) -> dict[str, str]:
         """Parse MCP_SERVERS env var into a mapping {alias: path}.
 
         Supports separators "=" or ":" between alias and path, and ";" between entries.
         """
-        mapping: Dict[str, str] = {}
+        mapping: dict[str, str] = {}
         for part in (servers_env or "").split(";"):
             part = part.strip()
             if not part:
@@ -209,7 +254,7 @@ class MCPClient:
             mapping[alias.strip()] = os.path.expanduser(path.strip())
         return mapping
 
-    async def connect_to_servers(self, alias_to_path: Dict[str, str]) -> None:
+    async def connect_to_servers(self, alias_to_path: dict[str, str]) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
         Args:
@@ -217,17 +262,32 @@ class MCPClient:
         """
         for alias, server_script_path in alias_to_path.items():
             server_script_path = os.path.expanduser(server_script_path)
-            is_python = server_script_path.endswith('.py')
-            is_js = server_script_path.endswith('.js')
+            is_python = server_script_path.endswith(".py")
+            is_js = server_script_path.endswith(".js")
             if not (is_python or is_js):
-                raise ValueError(f"Server script must be a .py or .js file for alias {alias}")
+                raise ValueError(
+                    f"Server script must be a .py or .js file for alias {alias}"
+                )
 
             command = "python" if is_python else "node"
-            server_params = StdioServerParameters(command=command, args=[server_script_path], env=None)
-            logger.info("mcp.connect.begin", extra={"alias": alias, "command": command, "script": server_script_path})
-            stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+            server_params = StdioServerParameters(
+                command=command, args=[server_script_path], env=None
+            )
+            logger.info(
+                "mcp.connect.begin",
+                extra={
+                    "alias": alias,
+                    "command": command,
+                    "script": server_script_path,
+                },
+            )
+            stdio_transport = await self.exit_stack.enter_async_context(
+                stdio_client(server_params)
+            )
             stdio, write = stdio_transport
-            session = await self.exit_stack.enter_async_context(ClientSession(stdio, write))
+            session = await self.exit_stack.enter_async_context(
+                ClientSession(stdio, write)
+            )
             await session.initialize()
             self.sessions[alias] = session
 
@@ -235,14 +295,17 @@ class MCPClient:
             for tool in response.tools:
                 qualified_name = f"{alias}__{tool.name}"
                 self.tool_registry[qualified_name] = (alias, tool.name)
-            logger.info("mcp.connect.done", extra={"alias": alias, "tool_count": len(response.tools)})
+            logger.info(
+                "mcp.connect.done",
+                extra={"alias": alias, "tool_count": len(response.tools)},
+            )
 
     async def process_query(self, query: str) -> str:
         """Process a query using Claude on Bedrock and available tools.
-        
+
         Args:
             query: The natural language query to process
-            
+
         Returns:
             The response from Claude after potentially calling tools
         """
@@ -254,15 +317,10 @@ class MCPClient:
                 mapping = self._parse_servers_env(servers_env)
                 if mapping:
                     await self.connect_to_servers(mapping)
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": query}] 
-            }
-        ]
+        messages = [{"role": "user", "content": [{"type": "text", "text": query}]}]
 
         # Discover tools from either single session or multi-sessions
-        available_tools: List[Dict[str, Any]] = []
+        available_tools: list[dict[str, Any]] = []
         if self.sessions:
             for qualified, (_alias, _tname) in self.tool_registry.items():
                 # We cannot fetch input schema here without another call; rely on list_tools per session
@@ -272,26 +330,30 @@ class MCPClient:
             for alias, session in self.sessions.items():
                 tools_resp = await session.list_tools()
                 for tool in tools_resp.tools:
-                    available_tools.append({
-                        "name": f"{alias}__{tool.name}",
-                        "description": tool.description,
-                        "input_schema": tool.inputSchema,
-                    })
+                    available_tools.append(
+                        {
+                            "name": f"{alias}__{tool.name}",
+                            "description": tool.description,
+                            "input_schema": tool.inputSchema,
+                        }
+                    )
         else:
             response = await self.session.list_tools()
-            available_tools = [{
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema
-            } for tool in response.tools]
+            available_tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.inputSchema,
+                }
+                for tool in response.tools
+            ]
 
-        
         iteration = 0
-        
+
         while iteration < MAX_ITERATIONS:
             iteration += 1
             logger.info(f"Starting conversation iteration {iteration}/{MAX_ITERATIONS}")
-            
+
             # Prepare request body for Bedrock
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
@@ -302,43 +364,46 @@ class MCPClient:
             }
 
             # Claude API call via Bedrock
-            logger.debug(f"Calling Claude with {len(messages)} messages and {len(available_tools)} tools")
+            logger.debug(
+                f"Calling Claude with {len(messages)} messages and {len(available_tools)} tools"
+            )
             response = self._invoke_with_retries(
                 model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
                 body=request_body,
             )
 
-            response_body = json.loads(response['body'].read())
-            assistant_content = response_body.get('content', [])
-            
+            response_body = json.loads(response["body"].read())
+            assistant_content = response_body.get("content", [])
+
             # Add assistant response to messages
-            messages.append({
-                "role": "assistant", 
-                "content": assistant_content
-            })
-            
+            messages.append({"role": "assistant", "content": assistant_content})
+
             # Check if there are any tool calls to process
-            tool_calls = [content for content in assistant_content if content.get('type') == 'tool_use']
+            tool_calls = [
+                content
+                for content in assistant_content
+                if content.get("type") == "tool_use"
+            ]
             logger.info("mcp.tool_calls", extra={"count": len(tool_calls)})
-            
+
             if not tool_calls:
                 # No tool calls, extract and return the final response
                 final_text = []
                 for content in assistant_content:
-                    if content.get('type') == 'text':
-                        final_text.append(content.get('text', ''))
+                    if content.get("type") == "text":
+                        final_text.append(content.get("text", ""))
                 result = "\n".join(final_text).strip()
-                
+
                 logger.info(f"Conversation completed in {iteration} iterations")
                 # Return non-empty result or a success message
                 return result if result else "Task completed successfully."
-            
+
             # Execute all tool calls and prepare tool results
             tool_results = []
             for tool_content in tool_calls:
-                tool_name = tool_content.get('name')
-                tool_args = tool_content.get('input', {})
-                tool_use_id = tool_content.get('id')
+                tool_name = tool_content.get("name")
+                tool_args = tool_content.get("input", {})
+                tool_use_id = tool_content.get("id")
 
                 try:
                     logger.info("mcp.tool.execute", extra={"name": tool_name})
@@ -351,33 +416,34 @@ class MCPClient:
                         result = await target_session.call_tool(short_name, tool_args)
                     else:
                         result = await self.session.call_tool(tool_name, tool_args)
-                    
+
                     tool_output = str(result.content)
                     print(f"Tool '{tool_name}' output: {tool_output}")
-                    
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": tool_output
-                    })
+
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": tool_output,
+                        }
+                    )
                     logger.info(f"Tool {tool_name} executed successfully")
                 except Exception as e:
                     logger.error(f"Error executing tool {tool_name}: {str(e)}")
                     # Handle tool execution errors
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": f"Error executing tool {tool_name}: {str(e)}",
-                        "is_error": True
-                    })
-            
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": f"Error executing tool {tool_name}: {str(e)}",
+                            "is_error": True,
+                        }
+                    )
+
             # Add user message with all tool results
             logger.debug(f"Adding {len(tool_results)} tool results to conversation")
-            messages.append({
-                "role": "user",
-                "content": tool_results
-            })
-        
+            messages.append({"role": "user", "content": tool_results})
+
         # If we reach here, we hit max iterations
         return f"Task partially completed but reached maximum conversation iterations ({MAX_ITERATIONS}). The assistant may need simpler instructions or the task may be too complex for automated execution."
 
@@ -409,28 +475,28 @@ class MCPClient:
         )
 
         # The streaming body yields events; `chunk` contains the JSON lines
-        stream = response.get('body')
+        stream = response.get("body")
         if stream is None:
             return
         for event in stream:
-            chunk = event.get('chunk')
+            chunk = event.get("chunk")
             if not chunk:
                 continue
-            data = chunk.get('bytes')
+            data = chunk.get("bytes")
             if not data:
                 continue
             try:
-                payload = json.loads(data.decode('utf-8'))
+                payload = json.loads(data.decode("utf-8"))
             except Exception:
                 continue
             # Anthropic streaming events: we care about contentBlockDelta for token text
-            if payload.get('type') == 'contentBlockDelta':
-                delta = payload.get('delta') or {}
-                text = delta.get('text')
+            if payload.get("type") == "contentBlockDelta":
+                delta = payload.get("delta") or {}
+                text = delta.get("text")
                 if text:
                     yield text
 
-    async def stream_conversation(self, query: str) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_conversation(self, query: str) -> AsyncIterator[dict[str, Any]]:
         """Stream a full conversation with tool use events and token deltas.
 
         Yields structured events:
@@ -462,24 +528,30 @@ class MCPClient:
 
         # Discover tools from MCP server
         # Build tools list (single or multi-session)
-        available_tools: List[Dict[str, Any]] = []
+        available_tools: list[dict[str, Any]] = []
         if self.sessions:
             for alias, session in self.sessions.items():
                 tools_resp = await session.list_tools()  # type: ignore[func-returns-value]
                 for t in tools_resp.tools:
-                    available_tools.append({
-                        "name": f"{alias}__{t.name}",
-                        "description": t.description,
-                        "input_schema": t.inputSchema,
-                    })
+                    available_tools.append(
+                        {
+                            "name": f"{alias}__{t.name}",
+                            "description": t.description,
+                            "input_schema": t.inputSchema,
+                        }
+                    )
         else:
             tools_resp = await self.session.list_tools()  # type: ignore[func-returns-value]
             available_tools = [
-                {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.inputSchema,
+                }
                 for t in tools_resp.tools
             ]
 
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": [{"type": "text", "text": query}]}
         ]
 
@@ -494,12 +566,12 @@ class MCPClient:
             }
 
             # State for this streamed message
-            assistant_text_parts: List[str] = []
-            pending_tool_calls: List[Dict[str, Any]] = []
-            current_block_type: Optional[str] = None
-            current_tool_name: Optional[str] = None
-            current_tool_id: Optional[str] = None
-            tool_input_buffer: List[str] = []
+            assistant_text_parts: list[str] = []
+            pending_tool_calls: list[dict[str, Any]] = []
+            current_block_type: str | None = None
+            current_tool_name: str | None = None
+            current_tool_id: str | None = None
+            tool_input_buffer: list[str] = []
 
             response = self._invoke_stream_with_retries(
                 model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
@@ -528,7 +600,9 @@ class MCPClient:
                     current_block_type = block.get("type")
                     if current_block_type == "tool_use":
                         current_tool_name = block.get("name")
-                        current_tool_id = block.get("id") or f"tool-{uuid.uuid4().hex[:8]}"
+                        current_tool_id = (
+                            block.get("id") or f"tool-{uuid.uuid4().hex[:8]}"
+                        )
                         tool_input_buffer = []
                 elif ptype == "contentBlockDelta":
                     delta = payload.get("delta", {})
@@ -569,9 +643,13 @@ class MCPClient:
 
             # If there are tool calls, execute them and continue loop
             if pending_tool_calls:
-                tool_results_content: List[Dict[str, Any]] = []
+                tool_results_content: list[dict[str, Any]] = []
                 for call in pending_tool_calls:
-                    yield {"type": "tool_call", "name": call["name"], "args": call["args"]}
+                    yield {
+                        "type": "tool_call",
+                        "name": call["name"],
+                        "args": call["args"],
+                    }
                     try:
                         # Execute via MCP (dispatch by alias if needed)
                         if self.sessions and "__" in call["name"]:
@@ -579,11 +657,19 @@ class MCPClient:
                             target_session = self.sessions.get(alias)
                             if target_session is None:
                                 raise ValueError(f"No MCP session for alias {alias}")
-                            result = await target_session.call_tool(short_name, call["args"])  # type: ignore[func-returns-value]
+                            result = await target_session.call_tool(
+                                short_name, call["args"]
+                            )  # type: ignore[func-returns-value]
                         else:
-                            result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
+                            result = await self.session.call_tool(
+                                call["name"], call["args"]
+                            )  # type: ignore[func-returns-value]
                         content_str = str(result.content)
-                        yield {"type": "tool_result", "name": call["name"], "content": content_str}
+                        yield {
+                            "type": "tool_result",
+                            "name": call["name"],
+                            "content": content_str,
+                        }
                         tool_results_content.append(
                             {
                                 "type": "tool_result",
@@ -593,7 +679,12 @@ class MCPClient:
                         )
                     except Exception as e:  # pragma: no cover - defensive
                         err = f"Error executing tool {call['name']}: {e}"
-                        yield {"type": "tool_result", "name": call["name"], "content": err, "is_error": True}
+                        yield {
+                            "type": "tool_result",
+                            "name": call["name"],
+                            "content": err,
+                            "is_error": True,
+                        }
                         tool_results_content.append(
                             {
                                 "type": "tool_result",
@@ -621,7 +712,7 @@ class MCPClient:
             try:
                 query = input("\nQuery: ").strip()
 
-                if query.lower() == 'quit':
+                if query.lower() == "quit":
                     break
 
                 response = await self.process_query(query)
@@ -633,6 +724,7 @@ class MCPClient:
     async def cleanup(self) -> None:
         """Clean up resources."""
         await self.exit_stack.aclose()
+
 
 async def main() -> None:
     """Main function for running the MCP client from command line."""
@@ -647,8 +739,8 @@ async def main() -> None:
     finally:
         await client.cleanup()
 
+
 if __name__ == "__main__":
     import sys
+
     asyncio.run(main())
-
-

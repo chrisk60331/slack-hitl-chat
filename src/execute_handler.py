@@ -5,65 +5,75 @@ This function loads an MCP server and executes approved actions
 based on the approval request ID.
 """
 
+import asyncio
 import json
+import logging
 import os
 import sys
-import asyncio
-import logging
 import traceback
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import boto3
 from pydantic import BaseModel, Field
 
-from src.approval_handler import get_approval_status
+from src.approval_handler import COMPLETION_STATUS, get_approval_status
 from src.mcp_client import MCPClient
-from src.approval_handler import COMPLETION_STATUS
+
 
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 # Also enable debug logging for related libraries
-logging.getLogger('pydantic_ai').setLevel(logging.DEBUG)
-logging.getLogger('asyncio').setLevel(logging.DEBUG)
+logging.getLogger("pydantic_ai").setLevel(logging.DEBUG)
+logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
 # Initialize AWS clients
-if os.getenv('LOCAL_DEV', 'false') == 'true':
+if os.getenv("LOCAL_DEV", "false") == "true":
     ddb_params = {
-        'endpoint_url': 'http://agentcore-dynamodb-local:8000',
-        'aws_access_key_id': 'test',
-        'aws_secret_access_key': 'test'
+        "endpoint_url": "http://agentcore-dynamodb-local:8000",
+        "aws_access_key_id": "test",
+        "aws_secret_access_key": "test",
     }
 else:
     ddb_params = {}
 
-dynamodb = boto3.resource('dynamodb', region_name=os.environ['AWS_REGION'], **ddb_params)
-TABLE_NAME = os.environ['TABLE_NAME']
+dynamodb = boto3.resource(
+    "dynamodb", region_name=os.environ["AWS_REGION"], **ddb_params
+)
+TABLE_NAME = os.environ["TABLE_NAME"]
 table = dynamodb.Table(TABLE_NAME)
 
 
 class ExecutionRequest(BaseModel):
     """Pydantic model for execution requests."""
-    request_id: Optional[str] = Field(None, description="Request ID to look up action from DynamoDB")
-    action_text: Optional[str] = Field(None, description="The natural language action to execute")
-    execution_timeout: int = Field(default=300, description="Timeout for execution in seconds")
+
+    request_id: str | None = Field(
+        None, description="Request ID to look up action from DynamoDB"
+    )
+    action_text: str | None = Field(
+        None, description="The natural language action to execute"
+    )
+    execution_timeout: int = Field(
+        default=300, description="Timeout for execution in seconds"
+    )
 
 
 class ExecutionResult(BaseModel):
     """Pydantic model for execution results."""
+
     request_id: str
     execution_status: str  # "success", "failed", "timeout"
     result: Any = None
-    error_message: Optional[str] = None
-    execution_time: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    error_message: str | None = None
+    execution_time: str = Field(
+        default_factory=lambda: datetime.now(UTC).isoformat()
+    )
 
 
 async def invoke_mcp_client(action_text: str):
@@ -72,7 +82,7 @@ async def invoke_mcp_client(action_text: str):
         # Prefer multi-server configuration when provided
         servers_env = os.getenv("MCP_SERVERS", "").strip()
         if servers_env:
-            alias_to_path: Dict[str, str] = {}
+            alias_to_path: dict[str, str] = {}
             for part in servers_env.split(";"):
                 if not part or "=" not in part:
                     continue
@@ -88,14 +98,14 @@ async def invoke_mcp_client(action_text: str):
     return result
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     Lambda handler for executing MCP actions from natural language text.
-    
+
     Args:
         event: Lambda event containing execution request with action_text
         context: Lambda context object
-        
+
     Returns:
         Response dictionary with execution results
     """
@@ -103,57 +113,63 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Execute Lambda received event: {json.dumps(event, default=str)}")
 
         # Extract request data from event
-        if 'body' in event:
-            if isinstance(event['body'], str):
-                body = json.loads(event['body'])
+        if "body" in event:
+            if isinstance(event["body"], str):
+                body = json.loads(event["body"])
             else:
-                body = event['body']
+                body = event["body"]
         else:
             body = event
-        
+
         logger.debug(f"Parsed request body: {body}")
-        
+
         # Create execution request
         execution_request = ExecutionRequest(**body)
         logger.debug(f"Created execution request: {execution_request}")
-        
+
         if execution_request.request_id:
-            logger.debug(f"Looking up action from DynamoDB for request_id: {execution_request.request_id}")
+            logger.debug(
+                f"Looking up action from DynamoDB for request_id: {execution_request.request_id}"
+            )
             # Look up the proposed_action from DynamoDB using request_id
             approval_item = get_approval_status(execution_request.request_id)
 
             response_body = ""
             if not approval_item:
-                raise ValueError(f"Request ID {execution_request.request_id} not found in approval log")
+                raise ValueError(
+                    f"Request ID {execution_request.request_id} not found in approval log"
+                )
             if approval_item.approval_status != "approve":
-                raise ValueError(f"Request {execution_request.request_id} is not approved (status: {approval_item.approval_status})")
+                raise ValueError(
+                    f"Request {execution_request.request_id} is not approved (status: {approval_item.approval_status})"
+                )
             elif approval_item.approval_status == "approve":
                 action_text = approval_item.proposed_action
                 request_id = execution_request.request_id or "direct_execution"
                 logger.info(f"Executing action for request {request_id}: {action_text}")
                 response_body = asyncio.run(invoke_mcp_client(action_text))
                 table.update_item(
-                    Key={'request_id': request_id},
-                    UpdateExpression='SET completion_status = :status, completion_message = :message',
+                    Key={"request_id": request_id},
+                    UpdateExpression="SET completion_status = :status, completion_message = :message",
                     ExpressionAttributeValues={
-                        ':status': str(COMPLETION_STATUS.COMPLETED),
-                        ':message': response_body
-                    }
+                        ":status": str(COMPLETION_STATUS.COMPLETED),
+                        ":message": response_body,
+                    },
                 )
             action_text = approval_item.proposed_action
             request_id = execution_request.request_id
             logger.debug(f"Retrieved action from DynamoDB: {action_text}")
-            
+
         else:
             raise ValueError("Either action_text or request_id must be provided")
-        
+
         result = {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
             },
-            'body': response_body
+            "body": response_body,
         }
         print(f"result {result}")
         return result
@@ -162,18 +178,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Lambda execution failed: {e}")
         logger.error(f"Lambda exception type: {type(e)}")
         logger.error(f"Lambda exception traceback: {traceback.format_exc()}")
-        
+
         error_response = {
-            'error': 'execution failed',
-            'details': str(e),
-            'exception_type': str(type(e))
+            "error": "execution failed",
+            "details": str(e),
+            "exception_type": str(type(e)),
         }
-        
+
         return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
             },
-            'body': error_response
+            "body": error_response,
         }

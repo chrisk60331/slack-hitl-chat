@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Any
 
 import boto3
 
@@ -29,8 +29,12 @@ class SlackSessionStore:
     """
 
     # Read environment at instantiation time (tests set env within test functions)
-    table_name: str = field(default_factory=lambda: os.environ.get("SLACK_SESSIONS_TABLE", ""))
-    region_name: str = field(default_factory=lambda: os.environ.get("AWS_REGION", "us-east-1"))
+    table_name: str = field(
+        default_factory=lambda: os.environ.get("SLACK_SESSIONS_TABLE", "")
+    )
+    region_name: str = field(
+        default_factory=lambda: os.environ.get("AWS_REGION", "us-east-1")
+    )
     _table: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -43,7 +47,7 @@ class SlackSessionStore:
     def _thread_key(channel_id: str, thread_ts: str) -> str:
         return f"{channel_id}:{thread_ts}"
 
-    def get_session_id(self, channel_id: str, thread_ts: str) -> Optional[str]:
+    def get_session_id(self, channel_id: str, thread_ts: str) -> str | None:
         """Return stored session id for a Slack thread, if present.
 
         Args:
@@ -58,7 +62,13 @@ class SlackSessionStore:
         item = resp.get("Item")
         return None if not item else str(item.get("session_id") or "") or None
 
-    def put_session_id(self, channel_id: str, thread_ts: str, session_id: str, ttl_seconds: int = 60 * 60 * 24 * 14) -> None:
+    def put_session_id(
+        self,
+        channel_id: str,
+        thread_ts: str,
+        session_id: str,
+        ttl_seconds: int = 60 * 60 * 24 * 14,
+    ) -> None:
         """Create/update session mapping with TTL (default 14 days).
 
         Args:
@@ -75,5 +85,3 @@ class SlackSessionStore:
             "ttl": now + int(ttl_seconds),
         }
         self._table.put_item(Item=item)
-
-

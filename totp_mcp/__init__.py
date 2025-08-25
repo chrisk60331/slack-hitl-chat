@@ -7,6 +7,3 @@ Manager and return the current TOTP code.
 __all__ = [
     "mcp_server",
 ]
-
-
-
