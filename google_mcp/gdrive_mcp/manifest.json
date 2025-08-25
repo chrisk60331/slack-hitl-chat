@@ -1,0 +1,241 @@
+{
+  "mcpServers": {
+    "gdrive_mcp": {
+      "command": "python",
+      "args": ["-m", "gdrive_mcp.mcp_server"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/google_mcp"
+      },
+      "description": "Google Drive MCP Server for document search, creation, and management",
+      "capabilities": {
+        "tools": {
+          "search_documents": {
+            "description": "Search for documents in Google Drive using various criteria",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Search query string"
+                },
+                "file_types": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["document", "spreadsheet", "presentation", "folder", "pdf"]
+                  },
+                  "description": "List of file types to search for"
+                },
+                "owner": {
+                  "type": "string",
+                  "description": "Email of the document owner to filter by"
+                },
+                "max_results": {
+                  "type": "integer",
+                  "default": 10,
+                  "description": "Maximum number of results to return"
+                },
+                "include_shared": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Whether to include shared documents"
+                }
+              },
+              "required": ["query"]
+            }
+          },
+          "create_document": {
+            "description": "Create a new document in Google Drive",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Title of the document"
+                },
+                "document_type": {
+                  "type": "string",
+                  "enum": ["document", "spreadsheet", "presentation", "folder"],
+                  "description": "Type of document to create"
+                },
+                "parent_folder_id": {
+                  "type": "string",
+                  "description": "ID of the parent folder to create the document in"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Initial content for the document (for text-based documents)"
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "List of email addresses to share the document with"
+                }
+              },
+              "required": ["title", "document_type"]
+            }
+          },
+          "get_document": {
+            "description": "Get detailed information about a specific document",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "description": "Google Drive document ID"
+                },
+                "include_content": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Whether to include document content in the response"
+                }
+              },
+              "required": ["document_id"]
+            }
+          },
+          "update_document": {
+            "description": "Update an existing document in Google Drive",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "description": "Google Drive document ID"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "New title for the document"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "New content for the document"
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "List of email addresses to update sharing permissions with"
+                }
+              },
+              "required": ["document_id"]
+            }
+          },
+          "delete_document": {
+            "description": "Delete a document from Google Drive",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "description": "Google Drive document ID"
+                },
+                "permanent": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Whether to permanently delete (true) or move to trash (false)"
+                }
+              },
+              "required": ["document_id"]
+            }
+          },
+          "list_folders": {
+            "description": "List folders in Google Drive",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "parent_folder_id": {
+                  "type": "string",
+                  "description": "ID of the parent folder to list contents from"
+                },
+                "max_results": {
+                  "type": "integer",
+                  "default": 50,
+                  "description": "Maximum number of results to return"
+                },
+                "include_shared": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Whether to include shared folders"
+                }
+              }
+            }
+          },
+          "list_drives": {
+            "description": "List shared drives accessible to the service account",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Optional name filter; matched with name contains when provided"
+                },
+                "max_results": {
+                  "type": "integer",
+                  "default": 50,
+                  "description": "Maximum number of shared drives to return"
+                }
+              }
+            }
+          },
+          "copy_document": {
+            "description": "Copy a document/file in Google Drive to an optional destination folder, optionally renaming it",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "source_document_id": {
+                  "type": "string",
+                  "description": "ID of the source document to copy"
+                },
+                "new_title": {
+                  "type": "string",
+                  "description": "Optional new title for the copied document"
+                },
+                "destination_folder_id": {
+                  "type": "string",
+                  "description": "Optional destination folder ID for the copied document"
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Optional list of email addresses to share the copied document with"
+                }
+              },
+              "required": ["source_document_id"]
+            }
+          },
+          "list_customer_files": {
+            "description": "List files for a given customer by navigating the customer folder hierarchy (root -> letter -> customer)",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "customer_name": {
+                  "type": "string",
+                  "description": "Full customer name used as the folder name"
+                },
+                "recursive": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "If true, include files from all subfolders recursively"
+                },
+                "max_results": {
+                  "type": "integer",
+                  "default": 100,
+                  "description": "Maximum number of results to return"
+                },
+                "include_shared": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Whether to include files not owned by the service account"
+                }
+              },
+              "required": ["customer_name"]
+            }
+          }
+        }
+      }
+    }
+  }
+}
