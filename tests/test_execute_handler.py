@@ -26,11 +26,15 @@ class TestExecuteHandler:
         request = ExecutionRequest(
             action_text="Create a new user with email test@example.com"
         )
-        assert request.action_text == "Create a new user with email test@example.com"
+        assert (
+            request.action_text
+            == "Create a new user with email test@example.com"
+        )
         assert request.execution_timeout == 300  # default
 
         request_with_timeout = ExecutionRequest(
-            action_text="List all users in domain example.com", execution_timeout=600
+            action_text="List all users in domain example.com",
+            execution_timeout=600,
         )
         assert request_with_timeout.execution_timeout == 600
 
@@ -73,7 +77,9 @@ class TestExecuteHandler:
     async def test_create_ai_agent_success(self) -> None:
         """Test successful AI agent creation."""
         with (
-            patch("src.execute_handler.MCPServerStreamableHTTP") as mock_server,
+            patch(
+                "src.execute_handler.MCPServerStreamableHTTP"
+            ) as mock_server,
             patch("src.execute_handler.BedrockConverseModel") as mock_model,
             patch("src.execute_handler.Agent") as mock_agent,
         ):
@@ -96,9 +102,9 @@ class TestExecuteHandler:
     async def test_create_ai_agent_with_defaults(self) -> None:
         """Test AI agent creation with default AWS region and Bedrock model."""
         with (
-            patch("src.execute_handler.MCPServerStreamableHTTP") as mock_server,
+            patch("src.execute_handler.MCPServerStreamableHTTP"),
             patch("src.execute_handler.BedrockConverseModel") as mock_model,
-            patch("src.execute_handler.Agent") as mock_agent,
+            patch("src.execute_handler.Agent"),
         ):
             agent = await create_ai_agent()
             assert agent is not None
@@ -115,7 +121,9 @@ class TestExecuteHandler:
         mock_result.data = {"message": "User created successfully"}
         mock_agent.run.return_value = mock_result
 
-        result = await execute_mcp_action(mock_agent, "Create user test@example.com")
+        result = await execute_mcp_action(
+            mock_agent, "Create user test@example.com"
+        )
 
         assert result == {"message": "User created successfully"}
         mock_agent.run.assert_called_once_with("Create user test@example.com")
@@ -139,7 +147,9 @@ class TestExecuteHandler:
         # Mock AI agent and execution
         mock_agent = Mock()
         mock_create_agent.return_value = mock_agent
-        mock_execute_action.return_value = {"message": "User created successfully"}
+        mock_execute_action.return_value = {
+            "message": "User created successfully"
+        }
 
         result = await execute_action_from_text("Create user test@example.com")
 
@@ -249,11 +259,15 @@ class TestExecuteHandler:
         assert response["statusCode"] == 200
         mock_get_approval.assert_called_once_with("test-request-123")
         mock_execute.assert_called_once_with(
-            "Create a new user with email test@example.com", 300, "test-request-123"
+            "Create a new user with email test@example.com",
+            300,
+            "test-request-123",
         )
 
     @patch("src.execute_handler.get_approval_status")
-    def test_lambda_handler_request_id_not_found(self, mock_get_approval: Mock) -> None:
+    def test_lambda_handler_request_id_not_found(
+        self, mock_get_approval: Mock
+    ) -> None:
         """Test lambda handler when request_id is not found in DynamoDB."""
         mock_get_approval.return_value = None
 
@@ -265,7 +279,9 @@ class TestExecuteHandler:
         assert "not found in approval log" in response["body"]["details"]
 
     @patch("src.execute_handler.get_approval_status")
-    def test_lambda_handler_request_not_approved(self, mock_get_approval: Mock) -> None:
+    def test_lambda_handler_request_not_approved(
+        self, mock_get_approval: Mock
+    ) -> None:
         """Test lambda handler when request is not approved."""
         from src.approval_handler import ApprovalItem
 

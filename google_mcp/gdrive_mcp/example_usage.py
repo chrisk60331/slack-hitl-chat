@@ -41,7 +41,11 @@ def example_search_documents() -> dict[str, Any]:
                 "modified_time": "2024-01-20T14:30:00Z",
                 "web_view_link": "https://docs.google.com/document/d/doc_123/edit",
                 "permissions": [
-                    {"email": "team@example.com", "role": "writer", "type": "user"}
+                    {
+                        "email": "team@example.com",
+                        "role": "writer",
+                        "type": "user",
+                    }
                 ],
             },
             {

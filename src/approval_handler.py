@@ -118,7 +118,9 @@ table = dynamodb.Table(TABLE_NAME)
 def _slack_update(slack_channel: str, slack_ts: str, text: str) -> None:
     try:
         if slack_channel and slack_ts:
-            from src.slack_lambda import _slack_api  # lazy import to avoid cycles
+            from src.slack_lambda import (
+                _slack_api,
+            )  # lazy import to avoid cycles
 
             bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
             if bot_token:
@@ -138,12 +140,16 @@ def get_lambda_function_url() -> str:
     Returns:
         The Lambda function URL or empty string if not available
     """
-    lambda_client = boto3.client("lambda", region_name=os.environ["AWS_REGION"])
+    lambda_client = boto3.client(
+        "lambda", region_name=os.environ["AWS_REGION"]
+    )
     function_name = os.environ.get("APPROVAL_LAMBDA_FUNCTION_NAME", "")
     if not function_name:
         return ""
     try:
-        response = lambda_client.get_function_url_config(FunctionName=function_name)
+        response = lambda_client.get_function_url_config(
+            FunctionName=function_name
+        )
         return response.get("FunctionUrl", "")
     except Exception:
         return ""
@@ -177,9 +183,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     for g in [
                         f.get("elements")
                         for f in json.loads(
-                            urllib.parse.unquote(base64.b64decode(body)).replace(
-                                "payload=", ""
-                            )
+                            urllib.parse.unquote(
+                                base64.b64decode(body)
+                            ).replace("payload=", "")
                         )
                         .get("message")
                         .get("blocks")
@@ -188,7 +194,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 }
             )[0]
             event["body"]["action"] = json.loads(
-                urllib.parse.unquote(base64.b64decode(body)).replace("payload=", "")
+                urllib.parse.unquote(base64.b64decode(body)).replace(
+                    "payload=", ""
+                )
             )["actions"][0]["action_id"]
             print(f"transformed event {event}")
         if body is not None:
@@ -305,7 +313,9 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     response = table.get_item(Key={"request_id": decision.request_id})
     item_data = response.get("Item")
     if not item_data:
-        raise ValueError(f"Request ID {decision.request_id} not found in approval log.")
+        raise ValueError(
+            f"Request ID {decision.request_id} not found in approval log."
+        )
 
     approval_item = ApprovalItem.from_dynamodb_item(item_data)
 
@@ -414,7 +424,9 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     slack_ts = event.get("slack_ts", "")
 
     # Compute deterministic request_id from action text
-    deterministic_request_id = compute_request_id_from_action(proposed_action_text)
+    deterministic_request_id = compute_request_id_from_action(
+        proposed_action_text
+    )
 
     # Evaluate policy using orchestrator policy code
     inferred_category, inferred_resource = infer_category_and_resource(
@@ -503,15 +515,12 @@ def send_notifications(
     proposed_action = proposed_action.replace("<@U099WCH3GM9>", "").strip()
     # Prepare message content
     if action == "pending":
-        status_emoji = "⏳"
         action_text = "Pending Approval"
         status = "pending"
     elif action == ApprovalOutcome.ALLOW:
-        status_emoji = "✅"
         action_text = "Approved"
         status = "✅ Approved"
     else:  # reject
-        status_emoji = "❌"
         action_text = "Rejected"
         status = "❌ Rejected"
     approval_link = f"{get_lambda_function_url()}?request_id={request_id}&action=approve&approver=admin|"
@@ -522,12 +531,16 @@ def send_notifications(
         "status": status,
         "requester": requester,
         "approver": approver,
-        "agent_prompt": agent_prompt[:500] + "..."
-        if len(agent_prompt) > 500
-        else agent_prompt,
-        "proposed_action": proposed_action[:300] + "..."
-        if len(proposed_action) > 300
-        else proposed_action,
+        "agent_prompt": (
+            agent_prompt[:500] + "..."
+            if len(agent_prompt) > 500
+            else agent_prompt
+        ),
+        "proposed_action": (
+            proposed_action[:300] + "..."
+            if len(proposed_action) > 300
+            else proposed_action
+        ),
         "approval_link": approval_link,
         "rejection_link": rejection_link,
         "reason": reason,
@@ -549,7 +562,9 @@ def send_notifications(
                     bot_token=slack_bot_token,
                 ):
                     notification_sent = True
-                    print(f"Slack Block Kit message sent for request {request_id}")
+                    print(
+                        f"Slack Block Kit message sent for request {request_id}"
+                    )
         # Fallback to webhook when configured
         elif SLACK_WEBHOOK_URL:
             from .slack_helper import post_slack_webhook_message
@@ -558,7 +573,9 @@ def send_notifications(
                 message_content, function_url_getter=get_lambda_function_url
             ):
                 notification_sent = True
-                print(f"Slack webhook notification sent for request {request_id}")
+                print(
+                    f"Slack webhook notification sent for request {request_id}"
+                )
     except Exception as e:  # pragma: no cover - defensive
         print(f"Error sending Slack notification: {e}")
 
@@ -602,9 +619,7 @@ Reason:
     # Add approval links only for pending requests
     function_url = get_lambda_function_url()
     if content.get("status") == "pending" and function_url:
-        approval_link = (
-            f"{function_url}?request_id={content['request_id']}&action=approve|"
-        )
+        approval_link = f"{function_url}?request_id={content['request_id']}&action=approve|"
         rejection_link = (
             f"{function_url}?request_id={content['request_id']}&action=reject|"
         )
@@ -651,12 +666,8 @@ def send_slack_notification(content: dict[str, str]) -> bool:
         function_url = get_lambda_function_url()
         if function_url:
             rid = content.get("request_id", "")
-            approve_link = (
-                f"{function_url}?request_id={rid}&action={ApprovalOutcome.ALLOW}"
-            )
-            reject_link = (
-                f"{function_url}?request_id={rid}&action={ApprovalOutcome.DENY}"
-            )
+            approve_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.ALLOW}"
+            reject_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.DENY}"
             lines.extend(
                 [
                     "",
@@ -711,14 +722,19 @@ def read_sns_messages_locally(
     """
     try:
         import boto3
-        from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+        from botocore.exceptions import (
+            NoCredentialsError,
+            PartialCredentialsError,
+        )
 
         # Check if we have AWS credentials
         try:
             session = boto3.Session()
             credentials = session.get_credentials()
             if not credentials:
-                print("Warning: No AWS credentials found. Cannot read SNS messages.")
+                print(
+                    "Warning: No AWS credentials found. Cannot read SNS messages."
+                )
                 return []
         except (NoCredentialsError, PartialCredentialsError):
             print("Warning: AWS credentials not configured properly.")
@@ -746,7 +762,8 @@ def read_sns_messages_locally(
 
 
 def create_test_sqs_queue_for_sns(
-    queue_name: str = "agentcore-sns-test-queue", region_name: str = "us-east-1"
+    queue_name: str = "agentcore-sns-test-queue",
+    region_name: str = "us-east-1",
 ) -> str | None:
     """
     Create a test SQS queue and subscribe it to the SNS topic for local testing.
@@ -782,7 +799,9 @@ def create_test_sqs_queue_for_sns(
 
         # Subscribe queue to SNS topic
         if SNS_TOPIC_ARN:
-            sns.subscribe(TopicArn=SNS_TOPIC_ARN, Protocol="sqs", Endpoint=queue_arn)
+            sns.subscribe(
+                TopicArn=SNS_TOPIC_ARN, Protocol="sqs", Endpoint=queue_arn
+            )
             print(f"Successfully created test queue: {queue_url}")
             print(f"Subscribed to SNS topic: {SNS_TOPIC_ARN}")
             return queue_url
@@ -839,9 +858,9 @@ def read_messages_from_test_queue(
                     "receipt_handle": message.get("ReceiptHandle"),
                     "sns_subject": body.get("Subject", ""),
                     "sns_message": body.get("Message", ""),
-                    "parsed_content": sns_message
-                    if isinstance(sns_message, dict)
-                    else {},
+                    "parsed_content": (
+                        sns_message if isinstance(sns_message, dict) else {}
+                    ),
                     "timestamp": body.get("Timestamp", ""),
                     "raw_body": message["Body"],
                 }

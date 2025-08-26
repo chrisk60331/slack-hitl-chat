@@ -34,7 +34,9 @@ class GoogleAdminClient:
         """Initialize the Google Admin client."""
         logger.debug("Getting Google credentials")
         self.credentials: Credentials = get_google_credentials()
-        self.service = build("admin", "directory_v1", credentials=self.credentials)
+        self.service = build(
+            "admin", "directory_v1", credentials=self.credentials
+        )
 
     def list_users(
         self, domain: str, maxResults: int = 10, orderBy: str = "email"
@@ -54,7 +56,9 @@ class GoogleAdminClient:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    def add_user(self, primary_email: str, first_name: str, last_name: str) -> dict:
+    def add_user(
+        self, primary_email: str, first_name: str, last_name: str
+    ) -> dict:
         """Create a new user."""
         try:
             password = generate_secure_password()
@@ -75,7 +79,10 @@ class GoogleAdminClient:
             raise HTTPException(status_code=500, detail=str(e))
 
     def get_user(
-        self, user_key: str, projection: str = "full", custom_field_mask: str = None
+        self,
+        user_key: str,
+        projection: str = "full",
+        custom_field_mask: str = None,
     ) -> dict:
         """Get detailed information about a specific user."""
         try:

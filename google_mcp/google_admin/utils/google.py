@@ -88,7 +88,9 @@ def get_google_credentials() -> service_account.Credentials:
         )
         logger.debug("Successfully created base credentials")
     except ValueError:
-        logger.error("Failed to create credentials: missing or invalid configuration")
+        logger.error(
+            "Failed to create credentials: missing or invalid configuration"
+        )
         raise
 
     # If using domain-wide delegation, add subject
@@ -110,7 +112,9 @@ def generate_secure_password() -> str:
     ]
     # Fill the rest with random characters
     password.extend(
-        secrets.choice(string.ascii_letters + string.digits + string.punctuation)
+        secrets.choice(
+            string.ascii_letters + string.digits + string.punctuation
+        )
         for _ in range(length - len(password))
     )
     # Shuffle the password

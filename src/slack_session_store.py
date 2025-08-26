@@ -39,7 +39,9 @@ class SlackSessionStore:
 
     def __post_init__(self) -> None:
         if not self.table_name:
-            raise ValueError("SLACK_SESSIONS_TABLE environment variable is required")
+            raise ValueError(
+                "SLACK_SESSIONS_TABLE environment variable is required"
+            )
         resource = boto3.resource("dynamodb", region_name=self.region_name)
         self._table = resource.Table(self.table_name)
 

@@ -27,7 +27,9 @@ class GoogleDriveClient:
         # Docs API client for content edits
         self.docs_service = build("docs", "v1", credentials=self.credentials)
 
-    def search_files(self, query: str, max_results: int = 10) -> list[dict[str, Any]]:
+    def search_files(
+        self, query: str, max_results: int = 10
+    ) -> list[dict[str, Any]]:
         """Search for files in Google Drive.
 
         Args:
@@ -64,7 +66,9 @@ class GoogleDriveClient:
             logger.error(f"Error searching files: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    def list_drives(self, query: str | None = None, max_results: int = 50) -> list[dict[str, Any]]:
+    def list_drives(
+        self, query: str | None = None, max_results: int = 50
+    ) -> list[dict[str, Any]]:
         """List shared drives the service account can access.
 
         Args:
@@ -75,7 +79,10 @@ class GoogleDriveClient:
             List of shared drive metadata dictionaries.
         """
         try:
-            logger.debug("Listing shared drives%s", f" with query: {query}" if query else "")
+            logger.debug(
+                "Listing shared drives%s",
+                f" with query: {query}" if query else "",
+            )
 
             kwargs: dict[str, Any] = {
                 "pageSize": max_results,
@@ -90,12 +97,16 @@ class GoogleDriveClient:
 
         except HttpError as e:
             logger.error(f"Google Drive API error: {e}")
-            raise HTTPException(status_code=500, detail=f"Google Drive API error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Google Drive API error: {str(e)}"
+            )
         except Exception as e:
             logger.error(f"Error listing shared drives: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    def get_file(self, file_id: str, include_content: bool = False) -> dict[str, Any]:
+    def get_file(
+        self, file_id: str, include_content: bool = False
+    ) -> dict[str, Any]:
         """Get file metadata and optionally content.
 
         Args:
@@ -122,7 +133,8 @@ class GoogleDriveClient:
             # Get content if requested and it's a Google Doc
             if (
                 include_content
-                and file_metadata["mimeType"] == "application/vnd.google-apps.document"
+                and file_metadata["mimeType"]
+                == "application/vnd.google-apps.document"
             ):
                 try:
                     # Export as plain text to get content
@@ -153,7 +165,10 @@ class GoogleDriveClient:
             raise HTTPException(status_code=500, detail=str(e))
 
     def create_google_doc(
-        self, title: str, content: str = "", parent_folder_id: str | None = None
+        self,
+        title: str,
+        content: str = "",
+        parent_folder_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a new Google Doc.
 
@@ -383,7 +398,9 @@ class GoogleDriveClient:
             body = document.get("body", {})
             content_elements = body.get("content", [])
             # The last content element's endIndex marks the end of the document
-            end_index = content_elements[-1]["endIndex"] if content_elements else 1
+            end_index = (
+                content_elements[-1]["endIndex"] if content_elements else 1
+            )
 
             requests: list[dict[str, Any]] = []
             if end_index > 1:
@@ -441,7 +458,9 @@ class GoogleDriveClient:
             result = (
                 self.service.permissions()
                 .create(
-                    fileId=file_id, body=permission, fields="id, emailAddress, role"
+                    fileId=file_id,
+                    body=permission,
+                    fields="id, emailAddress, role",
                 )
                 .execute()
             )

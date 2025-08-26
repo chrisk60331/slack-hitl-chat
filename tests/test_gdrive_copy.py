@@ -4,9 +4,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from google_mcp.gdrive_mcp.drive_client import GoogleDriveClient
 from google_mcp.gdrive_mcp.models import CopyDocumentRequest
 from google_mcp.gdrive_mcp.service import GoogleDriveService
-from google_mcp.gdrive_mcp.drive_client import GoogleDriveClient
 
 
 class TestCopyDocumentModel:
@@ -41,11 +41,14 @@ class TestCopyDocumentService:
     @pytest.fixture
     def service(self, mock_client: Mock) -> GoogleDriveService:
         with patch(
-            "google_mcp.gdrive_mcp.service.GoogleDriveClient", return_value=mock_client
+            "google_mcp.gdrive_mcp.service.GoogleDriveClient",
+            return_value=mock_client,
         ):
             return GoogleDriveService()
 
-    def test_copy_without_permissions(self, service: GoogleDriveService, mock_client: Mock) -> None:
+    def test_copy_without_permissions(
+        self, service: GoogleDriveService, mock_client: Mock
+    ) -> None:
         mock_client.copy_file.return_value = {
             "id": "copied1",
             "name": "Copied",
@@ -54,18 +57,27 @@ class TestCopyDocumentService:
             "webViewLink": "https://docs.google.com/copied1",
         }
 
-        req = CopyDocumentRequest(source_document_id="src1", new_title="Copied")
+        req = CopyDocumentRequest(
+            source_document_id="src1", new_title="Copied"
+        )
         result = service.copy_document(req)
 
         assert result["message"] == "Document copied successfully"
         assert result["document"]["id"] == "copied1"
         mock_client.copy_file.assert_called_once_with(
-            source_file_id="src1", new_title="Copied", destination_folder_id=None
+            source_file_id="src1",
+            new_title="Copied",
+            destination_folder_id=None,
         )
         mock_client.share_file.assert_not_called()
 
-    def test_copy_with_permissions(self, service: GoogleDriveService, mock_client: Mock) -> None:
-        mock_client.copy_file.return_value = {"id": "copied2", "name": "Copied"}
+    def test_copy_with_permissions(
+        self, service: GoogleDriveService, mock_client: Mock
+    ) -> None:
+        mock_client.copy_file.return_value = {
+            "id": "copied2",
+            "name": "Copied",
+        }
 
         req = CopyDocumentRequest(
             source_document_id="src2",
@@ -75,7 +87,9 @@ class TestCopyDocumentService:
         service.copy_document(req)
 
         mock_client.copy_file.assert_called_once_with(
-            source_file_id="src2", new_title=None, destination_folder_id="folder1"
+            source_file_id="src2",
+            new_title=None,
+            destination_folder_id="folder1",
         )
         assert mock_client.share_file.call_count == 2
 
@@ -85,7 +99,9 @@ class TestCopyDocumentClient:
 
     @patch("google_mcp.gdrive_mcp.drive_client.build")
     @patch("google_mcp.gdrive_mcp.drive_client.get_google_credentials")
-    def test_copy_file_api_chain(self, mock_get_creds: Mock, mock_build: Mock) -> None:
+    def test_copy_file_api_chain(
+        self, mock_get_creds: Mock, mock_build: Mock
+    ) -> None:
         mock_get_creds.return_value = Mock()
         mock_service = Mock()
         mock_build.return_value = mock_service
@@ -97,7 +113,9 @@ class TestCopyDocumentClient:
         mock_files.copy.return_value = mock_copy
 
         client = GoogleDriveClient()
-        result = client.copy_file("src", new_title="New Name", destination_folder_id="folderX")
+        result = client.copy_file(
+            "src", new_title="New Name", destination_folder_id="folderX"
+        )
 
         assert result["id"] == "new"
         mock_service.files.assert_called_once()
@@ -107,5 +125,3 @@ class TestCopyDocumentClient:
         assert kwargs["body"] == {"name": "New Name", "parents": ["folderX"]}
         assert kwargs["supportsAllDrives"] is True
         assert "fields" in kwargs
-
-

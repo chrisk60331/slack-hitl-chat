@@ -66,7 +66,11 @@ class TestSearchGifsRequest:
     def test_search_request_custom_values(self):
         """Test SearchGifsRequest with custom values."""
         request = SearchGifsRequest(
-            query="custom query", limit=20, rating="pg", language="es", offset=5
+            query="custom query",
+            limit=20,
+            rating="pg",
+            language="es",
+            offset=5,
         )
 
         assert request.query == "custom query"
@@ -136,7 +140,9 @@ class TestGifService:
                             "url": "https://tenor.com/view/test1.gif",
                             "dims": [480, 270],
                         },
-                        "tinygif": {"url": "https://tenor.com/view/test1_tiny.gif"},
+                        "tinygif": {
+                            "url": "https://tenor.com/view/test1_tiny.gif"
+                        },
                     },
                 },
                 {
@@ -147,7 +153,9 @@ class TestGifService:
                             "url": "https://tenor.com/view/test2.gif",
                             "dims": [480, 270],
                         },
-                        "tinygif": {"url": "https://tenor.com/view/test2_tiny.gif"},
+                        "tinygif": {
+                            "url": "https://tenor.com/view/test2_tiny.gif"
+                        },
                     },
                 },
             ],
@@ -177,7 +185,9 @@ class TestGifService:
         assert service.default_source == "mock"
 
     @patch("requests.get")
-    def test_search_giphy_success(self, mock_get, service, mock_giphy_response):
+    def test_search_giphy_success(
+        self, mock_get, service, mock_giphy_response
+    ):
         """Test successful Giphy search."""
         mock_response = Mock()
         mock_response.json.return_value = mock_giphy_response
@@ -210,7 +220,9 @@ class TestGifService:
         assert result.gifs[0].source == "mock"
 
     @patch("requests.get")
-    def test_search_tenor_success(self, mock_get, service, mock_tenor_response):
+    def test_search_tenor_success(
+        self, mock_get, service, mock_tenor_response
+    ):
         """Test successful Tenor search."""
         mock_response = Mock()
         mock_response.json.return_value = mock_tenor_response

@@ -22,7 +22,10 @@ class UserService:
         self.client = GoogleAdminClient()
 
     def list_users(
-        self, domain: str, maxResults: int | None = None, orderBy: str | None = None
+        self,
+        domain: str,
+        maxResults: int | None = None,
+        orderBy: str | None = None,
     ) -> dict:
         """List users in a domain.
 
@@ -49,7 +52,9 @@ class UserService:
 
         return user_list
 
-    def add_user(self, primary_email: str, first_name: str, last_name: str) -> dict:
+    def add_user(
+        self, primary_email: str, first_name: str, last_name: str
+    ) -> dict:
         """Create a new user.
 
         Args:
@@ -93,7 +98,9 @@ class UserService:
             "ip_whitelisted": response.get("ipWhitelisted", False),
             "recovery_email": response.get("recoveryEmail", "Not set"),
             "recovery_phone": response.get("recoveryPhone", "Not set"),
-            "suspension_reason": response.get("suspensionReason", "Not specified"),
+            "suspension_reason": response.get(
+                "suspensionReason", "Not specified"
+            ),
         }
 
     def suspend_user(self, user_key: str) -> dict:
@@ -270,7 +277,9 @@ class UserService:
         role_to_remove = f"{admin_role},{identity_provider}"
 
         # Filter out the exact role to remove
-        filtered_roles = [r for r in roles_raw if r.get("value") != role_to_remove]
+        filtered_roles = [
+            r for r in roles_raw if r.get("value") != role_to_remove
+        ]
 
         if len(filtered_roles) == len(roles_raw):
             return {
@@ -285,7 +294,7 @@ class UserService:
         # Update user with filtered roles
         update_body = {"customSchemas": {"Amazon": {"Role": filtered_roles}}}
 
-        response = self.client.update_user(user_key, update_body)
+        self.client.update_user(user_key, update_body)
 
         return {
             "message": (f"Successfully removed AWS role {admin_role}"),
@@ -308,7 +317,9 @@ class UserService:
             identity_provider=request.identity_provider,
         )
 
-    def remove_user_aws_roles_from_request(self, request: RemoveRoleRequest) -> dict:
+    def remove_user_aws_roles_from_request(
+        self, request: RemoveRoleRequest
+    ) -> dict:
         """Remove AWS roles using a validated request model.
 
         Args:

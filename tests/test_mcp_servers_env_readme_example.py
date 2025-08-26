@@ -1,7 +1,9 @@
 import os
 
 
-def test_readme_mcp_servers_example_includes_calendar_and_allows_totp(monkeypatch):
+def test_readme_mcp_servers_example_includes_calendar_and_allows_totp(
+    monkeypatch,
+):
     example = (
         "google=/abs/path/google_mcp/google_admin/mcp_server.py;"
         "jira=/abs/path/jira_mcp/server.py;"

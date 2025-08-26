@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field
 from src.approval_handler import COMPLETION_STATUS, get_approval_status
 from src.mcp_client import MCPClient
 
-
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
 logging.basicConfig(
@@ -91,7 +90,9 @@ async def invoke_mcp_client(action_text: str):
             if alias_to_path:
                 await client.connect_to_servers(alias_to_path)
         else:
-            await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
+            await client.connect_to_server(
+                "google_mcp/google_admin/mcp_server.py"
+            )
         result = await client.process_query(action_text)
     finally:
         await client.cleanup()
@@ -110,7 +111,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         Response dictionary with execution results
     """
     try:
-        logger.info(f"Execute Lambda received event: {json.dumps(event, default=str)}")
+        logger.info(
+            f"Execute Lambda received event: {json.dumps(event, default=str)}"
+        )
 
         # Extract request data from event
         if "body" in event:
@@ -146,7 +149,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             elif approval_item.approval_status == "approve":
                 action_text = approval_item.proposed_action
                 request_id = execution_request.request_id or "direct_execution"
-                logger.info(f"Executing action for request {request_id}: {action_text}")
+                logger.info(
+                    f"Executing action for request {request_id}: {action_text}"
+                )
                 response_body = asyncio.run(invoke_mcp_client(action_text))
                 table.update_item(
                     Key={"request_id": request_id},
@@ -161,7 +166,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             logger.debug(f"Retrieved action from DynamoDB: {action_text}")
 
         else:
-            raise ValueError("Either action_text or request_id must be provided")
+            raise ValueError(
+                "Either action_text or request_id must be provided"
+            )
 
         result = {
             "statusCode": 200,

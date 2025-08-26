@@ -46,7 +46,9 @@ def test_rows_to_issues_header_whitespace_and_ticket_type_aliases():
         for n in p.get("content", [])
         if n.get("type") == "text"
     ]
-    assert "Body" in "\n".join(text_blocks) and "AC 1" in "\n".join(text_blocks)
+    assert "Body" in "\n".join(text_blocks) and "AC 1" in "\n".join(
+        text_blocks
+    )
 
 
 def test_rows_to_issues_prefers_scrum_over_kanban_when_both_present():

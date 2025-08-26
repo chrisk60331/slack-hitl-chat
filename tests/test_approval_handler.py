@@ -186,14 +186,19 @@ class TestApprovalDecisionHandling:
 
     def test_is_approval_decision_with_body_string(self) -> None:
         """Test _is_approval_decision with JSON string body."""
-        event = {"body": json.dumps({"request_id": "test-123", "action": "reject"})}
+        event = {
+            "body": json.dumps({"request_id": "test-123", "action": "reject"})
+        }
 
         assert _is_approval_decision(event) is True
 
     def test_is_approval_decision_with_query_params(self) -> None:
         """Test _is_approval_decision with query parameters."""
         event = {
-            "queryStringParameters": {"request_id": "test-123", "action": "approve"}
+            "queryStringParameters": {
+                "request_id": "test-123",
+                "action": "approve",
+            }
         }
 
         assert _is_approval_decision(event) is True
@@ -207,7 +212,11 @@ class TestApprovalDecisionHandling:
     def test_extract_decision_data_from_dict_body(self) -> None:
         """Test _extract_decision_data from dict body."""
         event = {
-            "body": {"request_id": "test-123", "action": "approve", "approver": "admin"}
+            "body": {
+                "request_id": "test-123",
+                "action": "approve",
+                "approver": "admin",
+            }
         }
 
         data = _extract_decision_data(event)
@@ -220,7 +229,11 @@ class TestApprovalDecisionHandling:
         """Test _extract_decision_data from JSON string body."""
         event = {
             "body": json.dumps(
-                {"request_id": "test-123", "action": "reject", "reason": "Not safe"}
+                {
+                    "request_id": "test-123",
+                    "action": "reject",
+                    "reason": "Not safe",
+                }
             )
         }
 
@@ -335,7 +348,9 @@ class TestHandleApprovalDecision:
             BillingMode="PAY_PER_REQUEST",
         )
 
-        event = {"body": {"request_id": "nonexistent-123", "action": "approve"}}
+        event = {
+            "body": {"request_id": "nonexistent-123", "action": "approve"}
+        }
 
         with patch("src.approval_handler.table", table):
             with pytest.raises(
@@ -446,7 +461,9 @@ class TestLambdaHandler:
     @mock_aws
     @patch("src.approval_handler.TABLE_NAME", "test-table")
     @patch("src.approval_handler.send_notifications")
-    def test_lambda_handler_new_request(self, mock_send_notifications: Mock) -> None:
+    def test_lambda_handler_new_request(
+        self, mock_send_notifications: Mock
+    ) -> None:
         """Test lambda_handler with new approval request."""
         # Setup mock DynamoDB
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
@@ -558,7 +575,9 @@ class TestSendNotifications:
         "src.approval_handler.LAMBDA_FUNCTION_URL",
         "https://test.lambda-url.us-east-1.on.aws/",
     )
-    def test_send_notifications_pending_with_links(self, mock_sns: Mock) -> None:
+    def test_send_notifications_pending_with_links(
+        self, mock_sns: Mock
+    ) -> None:
         """Test sending pending notification with approval links."""
         mock_sns.publish.return_value = {"MessageId": "test-message-id"}
 

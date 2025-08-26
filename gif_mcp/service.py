@@ -23,7 +23,11 @@ class GifService:
         self.giphy_api_key = os.environ.get("GIPHY_API_KEY")
         self.tenor_api_key = os.environ.get("TENOR_API_KEY")
         self.default_source = (
-            "giphy" if self.giphy_api_key else "tenor" if self.tenor_api_key else "mock"
+            "giphy"
+            if self.giphy_api_key
+            else "tenor"
+            if self.tenor_api_key
+            else "mock"
         )
 
     def search_gifs(self, request: SearchGifsRequest) -> SearchGifsResponse:
@@ -60,7 +64,9 @@ class GifService:
         else:
             return self._get_random_mock(request)
 
-    def get_trending_gifs(self, request: GetTrendingGifsRequest) -> SearchGifsResponse:
+    def get_trending_gifs(
+        self, request: GetTrendingGifsRequest
+    ) -> SearchGifsResponse:
         """
         Get currently trending GIFs.
 
@@ -77,7 +83,9 @@ class GifService:
         else:
             return self._get_trending_mock(request)
 
-    def format_for_slack(self, gif: GifResult, message: str = "") -> SlackGifMessage:
+    def format_for_slack(
+        self, gif: GifResult, message: str = ""
+    ) -> SlackGifMessage:
         """
         Format a GIF result for Slack display.
 
@@ -93,7 +101,9 @@ class GifService:
         # Create Slack blocks for rich formatting
         # Note: Slack image blocks require the image to be publicly accessible
         # and the domain to be allowed in Slack workspace settings
-        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+        ]
 
         # Add image block if the GIF URL is accessible
         # For now, we'll include the image block but Slack may need domain allowlisting
@@ -140,16 +150,20 @@ class GifService:
                     preview_url=gif_data["images"]["preview_gif"]["url"],
                     width=int(gif_data["images"]["original"]["width"]),
                     height=int(gif_data["images"]["original"]["height"]),
-                    size=int(gif_data["images"]["original"]["size"])
-                    if gif_data["images"]["original"]["size"]
-                    else None,
+                    size=(
+                        int(gif_data["images"]["original"]["size"])
+                        if gif_data["images"]["original"]["size"]
+                        else None
+                    ),
                     source="giphy",
                 )
                 gifs.append(gif)
 
             return SearchGifsResponse(
                 gifs=gifs,
-                total_count=data.get("pagination", {}).get("total_count", len(gifs)),
+                total_count=data.get("pagination", {}).get(
+                    "total_count", len(gifs)
+                ),
                 query=request.query,
                 pagination=data.get("pagination", {}),
             )
@@ -188,9 +202,11 @@ class GifService:
 
             return SearchGifsResponse(
                 gifs=gifs,
-                total_count=data.get("next", "").split("=")[-1]
-                if data.get("next")
-                else len(gifs),
+                total_count=(
+                    data.get("next", "").split("=")[-1]
+                    if data.get("next")
+                    else len(gifs)
+                ),
                 query=request.query,
                 pagination={"next": data.get("next")},
             )
@@ -252,9 +268,11 @@ class GifService:
                 preview_url=gif_data["images"]["preview_gif"]["url"],
                 width=int(gif_data["images"]["original"]["width"]),
                 height=int(gif_data["images"]["original"]["height"]),
-                size=int(gif_data["images"]["original"]["size"])
-                if gif_data["images"]["original"]["size"]
-                else None,
+                size=(
+                    int(gif_data["images"]["original"]["size"])
+                    if gif_data["images"]["original"]["size"]
+                    else None
+                ),
                 source="giphy",
             )
         except Exception:
@@ -325,9 +343,11 @@ class GifService:
                     preview_url=gif_data["images"]["preview_gif"]["url"],
                     width=int(gif_data["images"]["original"]["width"]),
                     height=int(gif_data["images"]["original"]["height"]),
-                    size=int(gif_data["images"]["original"]["size"])
-                    if gif_data["images"]["original"]["size"]
-                    else None,
+                    size=(
+                        int(gif_data["images"]["original"]["size"])
+                        if gif_data["images"]["original"]["size"]
+                        else None
+                    ),
                     source="giphy",
                 )
                 gifs.append(gif)
@@ -380,7 +400,9 @@ class GifService:
         except Exception:
             return self._get_trending_mock(request)
 
-    def _get_trending_mock(self, request: GetTrendingGifsRequest) -> SearchGifsResponse:
+    def _get_trending_mock(
+        self, request: GetTrendingGifsRequest
+    ) -> SearchGifsResponse:
         """Get trending mock GIFs."""
         mock_gifs = [
             GifResult(

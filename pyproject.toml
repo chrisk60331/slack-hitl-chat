@@ -36,7 +36,7 @@ dependencies = [
     "fastapi-azure-auth>=5.1.1",
     "pydantic-ai>=0.0.12",
     # GIF MCP dependencies
-    "pillow>=10.0.0",  # For image processing if needed
+    "pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -100,7 +100,7 @@ exclude_lines = [
 
 [tool.black]
 target-version = ["py311"]
-line-length = 88
+line-length = 79
 extend-exclude = '''
 /(
   # The following are specific to Black, you probably don't want those.
@@ -111,7 +111,7 @@ extend-exclude = '''
 
 [tool.ruff]
 target-version = "py311"
-line-length = 88
+line-length = 79
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -122,7 +122,6 @@ select = [
     "UP", # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long, handled by black
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]

@@ -23,7 +23,9 @@ def test_url_verification(mock_get_secret_json: MagicMock) -> None:
 
 @patch("src.slack_lambda.requests.post")
 @patch("src.slack_lambda.get_secret_json")
-def test_oauth_flow(mock_get_secret_json: MagicMock, mock_post: MagicMock) -> None:
+def test_oauth_flow(
+    mock_get_secret_json: MagicMock, mock_post: MagicMock
+) -> None:
     os.environ["SLACK_SECRETS_NAME"] = "slack/creds"
     os.environ["AWS_REGION"] = "us-east-1"
     mock_get_secret_json.return_value = {
@@ -31,7 +33,10 @@ def test_oauth_flow(mock_get_secret_json: MagicMock, mock_post: MagicMock) -> No
         "client_secret": "sec",
         "redirect_uri": "https://x/cb",
     }
-    mock_post.return_value.json.return_value = {"ok": True, "access_token": "xoxb-1"}
+    mock_post.return_value.json.return_value = {
+        "ok": True,
+        "access_token": "xoxb-1",
+    }
 
     with patch("boto3.client") as mock_boto:
         event = {"queryStringParameters": {"code": "abc"}}
@@ -105,7 +110,9 @@ def test_events_handler_posts_initial_message(
     assert resp["statusCode"] == 200
 
     # Ensure initial postMessage was called at least once
-    called_urls = [call.args[0] for call in mock_requests_post.mock_calls if call.args]
+    called_urls = [
+        call.args[0] for call in mock_requests_post.mock_calls if call.args
+    ]
     assert any(url.endswith("chat.postMessage") for url in called_urls)
 
 
@@ -147,7 +154,12 @@ def test_events_handler_dedup_on_retry(
     base_body = {
         "type": "event_callback",
         "event_id": "Ev123",
-        "event": {"type": "message", "channel": "C1", "ts": "3.0", "text": "hello"},
+        "event": {
+            "type": "message",
+            "channel": "C1",
+            "ts": "3.0",
+            "text": "hello",
+        },
     }
 
     # First delivery
@@ -157,14 +169,19 @@ def test_events_handler_dedup_on_retry(
 
     # Retry delivery with retry headers should dedupe
     event2 = {
-        "headers": {"X-Slack-Retry-Num": "1", "X-Slack-Retry-Reason": "http_timeout"},
+        "headers": {
+            "X-Slack-Retry-Num": "1",
+            "X-Slack-Retry-Reason": "http_timeout",
+        },
         "body": json.dumps(base_body),
     }
     resp2 = events_handler(event2, None)
     assert resp2["statusCode"] == 200
 
     # Ensure chat.postMessage was not called twice for retry
-    post_calls = [call.args[0] for call in mock_requests_post.mock_calls if call.args]
+    post_calls = [
+        call.args[0] for call in mock_requests_post.mock_calls if call.args
+    ]
     assert sum(1 for u in post_calls if u.endswith("chat.postMessage")) == 1
 
 
@@ -199,7 +216,9 @@ def test_app_mention_posts_initial_message(
         return response
 
     mock_requests_post.side_effect = _post_side_effect
-    mock_stream.return_value = iter([json.dumps({"type": "final", "text": "ok"})])
+    mock_stream.return_value = iter(
+        [json.dumps({"type": "final", "text": "ok"})]
+    )
 
     event = {
         "headers": {},
@@ -218,5 +237,7 @@ def test_app_mention_posts_initial_message(
 
     resp = events_handler(event, None)
     assert resp["statusCode"] == 200
-    called_urls = [call.args[0] for call in mock_requests_post.mock_calls if call.args]
+    called_urls = [
+        call.args[0] for call in mock_requests_post.mock_calls if call.args
+    ]
     assert any(url.endswith("chat.postMessage") for url in called_urls)

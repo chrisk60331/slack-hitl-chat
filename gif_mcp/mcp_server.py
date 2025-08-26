@@ -140,7 +140,9 @@ def format_gif_for_slack(gif_data: dict, message: str = "") -> dict:
     description="Search for GIFs and format them for Slack in one operation.",
     tags=["gifs", "search", "slack", "formatting"],
 )
-def search_and_format_for_slack(query: str, message: str = "", limit: int = 5) -> dict:
+def search_and_format_for_slack(
+    query: str, message: str = "", limit: int = 5
+) -> dict:
     """
     Search for GIFs and format the first result for Slack display.
 
@@ -163,7 +165,10 @@ def search_and_format_for_slack(query: str, message: str = "", limit: int = 5) -
             "blocks": [
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"No GIFs found for '{query}'"},
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"No GIFs found for '{query}'",
+                    },
                 }
             ],
         }

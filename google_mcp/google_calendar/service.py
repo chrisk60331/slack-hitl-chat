@@ -55,7 +55,9 @@ class GoogleCalendarClient:
             creds: Credentials | None = None
             if os.path.exists(token_path):
                 try:
-                    creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+                    creds = Credentials.from_authorized_user_file(
+                        token_path, SCOPES
+                    )
                 except Exception:
                     creds = None
             if not creds or not creds.valid:
@@ -85,7 +87,10 @@ class GoogleCalendarClient:
             self._credentials = creds
 
         self._service = build(
-            "calendar", "v3", credentials=self._credentials, cache_discovery=False
+            "calendar",
+            "v3",
+            credentials=self._credentials,
+            cache_discovery=False,
         )
         return self._service
 
@@ -104,7 +109,9 @@ class GoogleCalendarClient:
     ) -> dict[str, Any]:
         svc = self._ensure_service()
         if not _iso_has_tz(time_min) or not _iso_has_tz(time_max):
-            raise ValueError("time_min and time_max must be ISO8601 with timezone")
+            raise ValueError(
+                "time_min and time_max must be ISO8601 with timezone"
+            )
         body: dict[str, Any] = {
             "timeMin": time_min,
             "timeMax": time_max,
@@ -114,15 +121,25 @@ class GoogleCalendarClient:
             body["timeZone"] = timezone
         return svc.freebusy().query(body=body).execute()
 
-    def create_event(self, body: dict[str, Any], calendar_id: str) -> dict[str, Any]:
+    def create_event(
+        self, body: dict[str, Any], calendar_id: str
+    ) -> dict[str, Any]:
         svc = self._ensure_service()
         return svc.events().insert(calendarId=calendar_id, body=body).execute()
 
     def get_event(self, calendar_id: str, event_id: str) -> dict[str, Any]:
         svc = self._ensure_service()
-        return svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
+        return (
+            svc.events()
+            .get(calendarId=calendar_id, eventId=event_id)
+            .execute()
+        )
 
     def delete_event(self, calendar_id: str, event_id: str) -> dict[str, Any]:
         svc = self._ensure_service()
         svc.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-        return {"status": "deleted", "calendar_id": calendar_id, "event_id": event_id}
+        return {
+            "status": "deleted",
+            "calendar_id": calendar_id,
+            "event_id": event_id,
+        }

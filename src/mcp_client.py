@@ -17,7 +17,6 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-
 load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
 # Set up logging
@@ -32,6 +31,11 @@ SYSTEM_PROMPT: str = (
     "- Always pass tool inputs under a top-level 'request' object, matching the tool's input schema.\n"
     "- Prefer idempotent behavior: check state first, then add/remove only if needed.\n"
     "- Only claim success if the final tool confirms success; otherwise state the actual outcome (already had role / not found / error).\n\n"
+    "- Format in plain text, do not use markdown.\n"
+    "Google Drive:\n"
+    "- Provide links to the document in the response.\n"
+    "- Always provide links when using Google Drive tools. Avoid 'View' links.\n"
+    "\n"
     "AWS role access management:\n"
     "- To GRANT access, call add_amazon_role with fields: user_key, admin_role, identity_provider. Account ID is derived from ARNs.\n"
     "  - admin_role MUST be the FULL AWS role ARN in the form arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME.\n"
@@ -80,11 +84,9 @@ class MCPClient:
         # Network and timeout issues
         if isinstance(
             exc,
-            (
-                botocore_exceptions.ReadTimeoutError,
-                botocore_exceptions.ConnectTimeoutError,
-                botocore_exceptions.EndpointConnectionError,
-            ),
+            botocore_exceptions.ReadTimeoutError
+            | botocore_exceptions.ConnectTimeoutError
+            | botocore_exceptions.EndpointConnectionError,
         ):
             return True
         # API-level errors
@@ -135,13 +137,18 @@ class MCPClient:
                     modelId=model_id, body=json.dumps(body)
                 )
             except Exception as exc:  # noqa: BLE001 - filtered by helper
-                if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
+                if (
+                    not self._is_retryable_bedrock_error(exc)
+                    or attempt >= max_retries
+                ):
                     logger.error(
                         "bedrock.invoke_model.failed",
                         extra={"attempt": attempt, "error": str(exc)},
                     )
                     raise
-                delay = (base_delay_seconds * (2**attempt)) + random.uniform(0, 0.25)
+                delay = (base_delay_seconds * (2**attempt)) + random.uniform(
+                    0, 0.25
+                )
                 logger.warning(
                     "bedrock.invoke_model.retrying",
                     extra={
@@ -179,13 +186,18 @@ class MCPClient:
                     modelId=model_id, body=json.dumps(body)
                 )
             except Exception as exc:  # noqa: BLE001
-                if not self._is_retryable_bedrock_error(exc) or attempt >= max_retries:
+                if (
+                    not self._is_retryable_bedrock_error(exc)
+                    or attempt >= max_retries
+                ):
                     logger.error(
                         "bedrock.invoke_model_stream.failed",
                         extra={"attempt": attempt, "error": str(exc)},
                     )
                     raise
-                delay = (base_delay_seconds * (2**attempt)) + random.uniform(0, 0.25)
+                delay = (base_delay_seconds * (2**attempt)) + random.uniform(
+                    0, 0.25
+                )
                 logger.warning(
                     "bedrock.invoke_model_stream.retrying",
                     extra={
@@ -317,12 +329,14 @@ class MCPClient:
                 mapping = self._parse_servers_env(servers_env)
                 if mapping:
                     await self.connect_to_servers(mapping)
-        messages = [{"role": "user", "content": [{"type": "text", "text": query}]}]
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": query}]}
+        ]
 
         # Discover tools from either single session or multi-sessions
         available_tools: list[dict[str, Any]] = []
         if self.sessions:
-            for qualified, (_alias, _tname) in self.tool_registry.items():
+            for _qualified, (_alias, _tname) in self.tool_registry.items():
                 # We cannot fetch input schema here without another call; rely on list_tools per session
                 # Build available tools by querying each session once
                 pass
@@ -352,7 +366,9 @@ class MCPClient:
 
         while iteration < MAX_ITERATIONS:
             iteration += 1
-            logger.info(f"Starting conversation iteration {iteration}/{MAX_ITERATIONS}")
+            logger.info(
+                f"Starting conversation iteration {iteration}/{MAX_ITERATIONS}"
+            )
 
             # Prepare request body for Bedrock
             request_body = {
@@ -376,7 +392,9 @@ class MCPClient:
             assistant_content = response_body.get("content", [])
 
             # Add assistant response to messages
-            messages.append({"role": "assistant", "content": assistant_content})
+            messages.append(
+                {"role": "assistant", "content": assistant_content}
+            )
 
             # Check if there are any tool calls to process
             tool_calls = [
@@ -394,7 +412,9 @@ class MCPClient:
                         final_text.append(content.get("text", ""))
                 result = "\n".join(final_text).strip()
 
-                logger.info(f"Conversation completed in {iteration} iterations")
+                logger.info(
+                    f"Conversation completed in {iteration} iterations"
+                )
                 # Return non-empty result or a success message
                 return result if result else "Task completed successfully."
 
@@ -412,10 +432,16 @@ class MCPClient:
                         alias, short_name = tool_name.split("__", 1)
                         target_session = self.sessions.get(alias)
                         if target_session is None:
-                            raise ValueError(f"No MCP session for alias {alias}")
-                        result = await target_session.call_tool(short_name, tool_args)
+                            raise ValueError(
+                                f"No MCP session for alias {alias}"
+                            )
+                        result = await target_session.call_tool(
+                            short_name, tool_args
+                        )
                     else:
-                        result = await self.session.call_tool(tool_name, tool_args)
+                        result = await self.session.call_tool(
+                            tool_name, tool_args
+                        )
 
                     tool_output = str(result.content)
                     print(f"Tool '{tool_name}' output: {tool_output}")
@@ -441,7 +467,9 @@ class MCPClient:
                     )
 
             # Add user message with all tool results
-            logger.debug(f"Adding {len(tool_results)} tool results to conversation")
+            logger.debug(
+                f"Adding {len(tool_results)} tool results to conversation"
+            )
             messages.append({"role": "user", "content": tool_results})
 
         # If we reach here, we hit max iterations
@@ -496,7 +524,9 @@ class MCPClient:
                 if text:
                     yield text
 
-    async def stream_conversation(self, query: str) -> AsyncIterator[dict[str, Any]]:
+    async def stream_conversation(
+        self, query: str
+    ) -> AsyncIterator[dict[str, Any]]:
         """Stream a full conversation with tool use events and token deltas.
 
         Yields structured events:
@@ -523,7 +553,10 @@ class MCPClient:
                     await self.connect_to_servers(mapping)
             if self.session is None and not self.sessions:
                 # If caller forgot to connect, provide a clear error
-                yield {"type": "error", "message": "MCP session not initialized"}
+                yield {
+                    "type": "error",
+                    "message": "MCP session not initialized",
+                }
                 return
 
         # Discover tools from MCP server
@@ -620,7 +653,9 @@ class MCPClient:
                 elif ptype == "contentBlockStop":
                     if current_block_type == "tool_use":
                         # Finalize tool input JSON
-                        args_json = ("".join(tool_input_buffer) or "{}").strip()
+                        args_json = (
+                            "".join(tool_input_buffer) or "{}"
+                        ).strip()
                         try:
                             tool_args = json.loads(args_json)
                         except Exception:
@@ -656,7 +691,9 @@ class MCPClient:
                             alias, short_name = call["name"].split("__", 1)
                             target_session = self.sessions.get(alias)
                             if target_session is None:
-                                raise ValueError(f"No MCP session for alias {alias}")
+                                raise ValueError(
+                                    f"No MCP session for alias {alias}"
+                                )
                             result = await target_session.call_tool(
                                 short_name, call["args"]
                             )  # type: ignore[func-returns-value]
@@ -695,7 +732,9 @@ class MCPClient:
                         )
 
                 # Add tool results as a user message and continue
-                messages.append({"role": "user", "content": tool_results_content})
+                messages.append(
+                    {"role": "user", "content": tool_results_content}
+                )
                 continue
 
             # No tools requested; finalize

@@ -59,7 +59,9 @@ def test_model_creation():
         print("✓ SearchDocumentsRequest created successfully")
 
         # Test create request
-        create_req = CreateDocumentRequest(title="Test Doc", document_type="document")
+        create_req = CreateDocumentRequest(
+            title="Test Doc", document_type="document"
+        )
         assert create_req.title == "Test Doc"
         print("✓ CreateDocumentRequest created successfully")
 

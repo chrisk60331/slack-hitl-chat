@@ -26,7 +26,8 @@ def test_post_slack_webhook_message_basic(mock_post: Mock) -> None:
     }
 
     with patch.dict(
-        "os.environ", {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T/X/Y"}
+        "os.environ",
+        {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T/X/Y"},
     ):
         ok = post_slack_webhook_message(content)
         assert ok is True
@@ -53,7 +54,9 @@ def test_post_slack_webhook_message_no_webhook(mock_post: Mock) -> None:
 
 
 @patch("src.slack_helper.requests.post")
-def test_post_slack_webhook_message_pending_includes_links(mock_post: Mock) -> None:
+def test_post_slack_webhook_message_pending_includes_links(
+    mock_post: Mock,
+) -> None:
     mock_post.return_value.status_code = 200
     mock_post.return_value.text = "ok"
 
@@ -69,12 +72,20 @@ def test_post_slack_webhook_message_pending_includes_links(mock_post: Mock) -> N
     }
 
     with patch.dict(
-        "os.environ", {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T/X/Y"}
+        "os.environ",
+        {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/T/X/Y"},
     ):
-        ok = post_slack_webhook_message(content, function_url_getter=_fake_function_url)
+        ok = post_slack_webhook_message(
+            content, function_url_getter=_fake_function_url
+        )
         assert ok is True
         args, kwargs = mock_post.call_args
         assert "json" in kwargs
         text = kwargs["json"]["text"]
-        assert "Approve: https://lambda-url?request_id=req-2&action=approve" in text
-        assert "Reject: https://lambda-url?request_id=req-2&action=reject" in text
+        assert (
+            "Approve: https://lambda-url?request_id=req-2&action=approve"
+            in text
+        )
+        assert (
+            "Reject: https://lambda-url?request_id=req-2&action=reject" in text
+        )

@@ -16,10 +16,12 @@ class FreeBusyRequest(BaseModel):
 
     calendar_ids: list[str] = Field(..., description="Calendar IDs to query")
     time_min: str = Field(
-        ..., description="ISO8601 start with timezone, e.g. 2025-07-20T09:00:00-04:00"
+        ...,
+        description="ISO8601 start with timezone, e.g. 2025-07-20T09:00:00-04:00",
     )
     time_max: str = Field(
-        ..., description="ISO8601 end with timezone, e.g. 2025-07-20T18:00:00-04:00"
+        ...,
+        description="ISO8601 end with timezone, e.g. 2025-07-20T18:00:00-04:00",
     )
     timezone: str | None = Field(
         None, description="IANA TZ database name, e.g. America/New_York"

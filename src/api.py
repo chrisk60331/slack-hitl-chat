@@ -64,7 +64,9 @@ async def slack_interactions(request: Request) -> dict[str, str]:
     )
 
     signing_secret = os.getenv("SLACK_SIGNING_SECRET", "")
-    if not verify_slack_request(signing_secret, timestamp, raw_body, signature):
+    if not verify_slack_request(
+        signing_secret, timestamp, raw_body, signature
+    ):
         raise HTTPException(status_code=401, detail="invalid signature")
 
     form = await request.form()
@@ -131,9 +133,12 @@ async def create_session() -> dict[str, str]:
 
 
 @app.post(
-    "/gateway/v1/sessions/{session_id}/messages", response_model=PostMessageResponse
+    "/gateway/v1/sessions/{session_id}/messages",
+    response_model=PostMessageResponse,
 )
-async def post_message(session_id: str, payload: PostMessageRequest) -> dict[str, str]:
+async def post_message(
+    session_id: str, payload: PostMessageRequest
+) -> dict[str, str]:
     import asyncio
     import uuid
 
@@ -158,7 +163,9 @@ async def post_message(session_id: str, payload: PostMessageRequest) -> dict[str
             server_path = os.getenv(
                 "MCP_SERVER_PATH", "google_mcp/google_admin/mcp_server.py"
             )
-            logger.info("gateway.producer.connect", extra={"server_path": server_path})
+            logger.info(
+                "gateway.producer.connect", extra={"server_path": server_path}
+            )
             await client.connect_to_server(server_path)
             async for event in client.stream_conversation(payload.query):
                 await queue.put(json.dumps(event))

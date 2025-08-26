@@ -25,7 +25,9 @@ def test_slack_formatting():
     service = GifService()
 
     # Format for Slack
-    slack_message = service.format_for_slack(gif, "🎉 Here's a funny GIF for you!")
+    slack_message = service.format_for_slack(
+        gif, "🎉 Here's a funny GIF for you!"
+    )
 
     print("=== Slack Message Format ===")
     print(f"Text: {slack_message.text}")
@@ -61,7 +63,9 @@ def test_slack_formatting():
     print("\n=== Blocks Validation ===")
     if slack_message.blocks:
         print("✅ Blocks generated successfully")
-        image_blocks = [b for b in slack_message.blocks if b["type"] == "image"]
+        image_blocks = [
+            b for b in slack_message.blocks if b["type"] == "image"
+        ]
         if image_blocks:
             print(f"✅ Found {len(image_blocks)} image block(s)")
             for block in image_blocks:

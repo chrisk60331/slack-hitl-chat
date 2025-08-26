@@ -129,7 +129,9 @@ def _extract_base32_secret(secret_value: str, key_field: str) -> str:
 )
 def get_totp_code(request: GetTotpCodeRequest) -> dict[str, str]:
     """Return the current TOTP code for the secret in Secrets Manager."""
-    secret_value = _get_secret_value(request.secret_name, request.secret_region)
+    secret_value = _get_secret_value(
+        request.secret_name, request.secret_region
+    )
     base32_secret = _extract_base32_secret(secret_value, request.key_field)
     code = _totp_from_base32(base32_secret, request.period, request.digits)
     return {"code": code}

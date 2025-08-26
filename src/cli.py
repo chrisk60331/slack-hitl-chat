@@ -8,7 +8,11 @@ import json
 import click
 from dotenv import load_dotenv
 
-from .orchestrator import AgentOrchestrator, OrchestratorRequest, OrchestratorResult
+from .orchestrator import (
+    AgentOrchestrator,
+    OrchestratorRequest,
+    OrchestratorResult,
+)
 
 load_dotenv()
 
@@ -45,7 +49,9 @@ def _format_result(result: OrchestratorResult) -> str:
 @click.option("--tool-name", default=None, help="Preferred tool name")
 @click.option("--category", default=None, help="Approval category override")
 @click.option("--resource", default=None, help="Target resource identifier")
-@click.option("--amount", type=float, default=None, help="Numeric threshold/amount")
+@click.option(
+    "--amount", type=float, default=None, help="Numeric threshold/amount"
+)
 @click.option("--environment", default=None, help="Environment")
 @click.option(
     "--json",

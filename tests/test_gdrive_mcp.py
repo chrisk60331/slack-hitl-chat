@@ -21,7 +21,10 @@ def test_service_builds_queries(monkeypatch: Any) -> None:
         def search_files(self, query: str, max_results: int = 10):
             self.calls.append((query, max_results))
             # Simulate letter folder found first, then customer folder, then files
-            if "in parents" in query and "mimeType='application/vnd.google-apps.folder'" in query:
+            if (
+                "in parents" in query
+                and "mimeType='application/vnd.google-apps.folder'" in query
+            ):
                 if "name='A'" in query:
                     return [{"id": "letterA"}]
                 if "name='Acme Corp'" in query:
@@ -57,6 +60,7 @@ def test_service_builds_queries(monkeypatch: Any) -> None:
     assert out["total_files"] == 1
     assert out["files"][0]["name"] == "Doc1"
 
+
 """Unit tests for Google Drive MCP functionality."""
 
 from unittest.mock import Mock, patch
@@ -73,7 +77,6 @@ from google_mcp.gdrive_mcp.models import (
     SearchDocumentsRequest,
     UpdateDocumentRequest,
 )
-from google_mcp.gdrive_mcp.service import GoogleDriveService
 
 
 class TestSearchDocumentsRequest:
@@ -163,7 +166,9 @@ class TestUpdateDocumentRequest:
     def test_valid_request(self):
         """Test valid update document request."""
         request = UpdateDocumentRequest(
-            document_id="12345", title="Updated Title", content="Updated content"
+            document_id="12345",
+            title="Updated Title",
+            content="Updated content",
         )
 
         assert request.document_id == "12345"
@@ -231,7 +236,8 @@ class TestGoogleDriveService:
     def service(self, mock_client):
         """Create a service instance with mocked client."""
         with patch(
-            "google_mcp.gdrive_mcp.service.GoogleDriveClient", return_value=mock_client
+            "google_mcp.gdrive_mcp.service.GoogleDriveClient",
+            return_value=mock_client,
         ):
             return GoogleDriveService()
 
@@ -286,7 +292,9 @@ class TestGoogleDriveService:
         mock_client.create_google_doc.return_value = mock_doc
 
         request = CreateDocumentRequest(
-            title="New Document", document_type="document", content="Initial content"
+            title="New Document",
+            document_type="document",
+            content="Initial content",
         )
 
         result = service.create_document(request)
@@ -296,7 +304,9 @@ class TestGoogleDriveService:
         assert result["document"]["name"] == "New Document"
 
         mock_client.create_google_doc.assert_called_once_with(
-            title="New Document", content="Initial content", parent_folder_id=None
+            title="New Document",
+            content="Initial content",
+            parent_folder_id=None,
         )
 
     def test_create_spreadsheet(self, service, mock_client):
@@ -309,7 +319,9 @@ class TestGoogleDriveService:
         }
         mock_client.create_google_sheet.return_value = mock_sheet
 
-        request = CreateDocumentRequest(title="New Sheet", document_type="spreadsheet")
+        request = CreateDocumentRequest(
+            title="New Sheet", document_type="spreadsheet"
+        )
 
         result = service.create_document(request)
 
@@ -330,7 +342,9 @@ class TestGoogleDriveService:
         }
         mock_client.create_folder.return_value = mock_folder
 
-        request = CreateDocumentRequest(title="New Folder", document_type="folder")
+        request = CreateDocumentRequest(
+            title="New Folder", document_type="folder"
+        )
 
         result = service.create_document(request)
 
@@ -375,7 +389,9 @@ class TestGoogleDriveService:
             "name": "Updated",
         }
 
-        request = UpdateDocumentRequest(document_id="doc1", title="Updated Title")
+        request = UpdateDocumentRequest(
+            document_id="doc1", title="Updated Title"
+        )
 
         result = service.update_document(request)
 
@@ -423,7 +439,9 @@ class TestGoogleDriveService:
         ]
         mock_client.search_files.return_value = mock_folders
 
-        request = ListFoldersRequest(parent_folder_id="parent123", max_results=25)
+        request = ListFoldersRequest(
+            parent_folder_id="parent123", max_results=25
+        )
 
         result = service.list_folders(request)
 
@@ -434,7 +452,10 @@ class TestGoogleDriveService:
         # Verify search query includes folder type and parent filter
         mock_client.search_files.assert_called_once()
         call_args = mock_client.search_files.call_args
-        assert "mimeType='application/vnd.google-apps.folder'" in call_args[1]["query"]
+        assert (
+            "mimeType='application/vnd.google-apps.folder'"
+            in call_args[1]["query"]
+        )
         assert "parent123" in call_args[1]["query"]
 
     def test_search_with_file_type_filters(self, service, mock_client):
@@ -472,7 +493,9 @@ class TestGoogleDriveService:
         """Test search with owner filtering."""
         mock_client.search_files.return_value = []
 
-        request = SearchDocumentsRequest(query="test", owner="owner@example.com")
+        request = SearchDocumentsRequest(
+            query="test", owner="owner@example.com"
+        )
 
         service.search_documents(request)
 
@@ -512,7 +535,9 @@ class TestGoogleDriveClient:
 
     @patch("google_mcp.gdrive_mcp.drive_client.build")
     @patch("google_mcp.gdrive_mcp.drive_client.get_google_credentials")
-    def test_list_drives(self, mock_get_creds, mock_build, mock_credentials, mock_service):
+    def test_list_drives(
+        self, mock_get_creds, mock_build, mock_credentials, mock_service
+    ):
         """Test listing shared drives."""
         mock_get_creds.return_value = mock_credentials
         mock_build.return_value = mock_service
@@ -554,7 +579,10 @@ class TestGoogleDriveServiceListDrives:
 
     @pytest.fixture
     def service(self, mock_client):
-        with patch("google_mcp.gdrive_mcp.service.GoogleDriveClient", return_value=mock_client):
+        with patch(
+            "google_mcp.gdrive_mcp.service.GoogleDriveClient",
+            return_value=mock_client,
+        ):
             return GoogleDriveService()
 
     def test_list_drives_service(self, service, mock_client):
@@ -573,7 +601,10 @@ class TestGoogleDriveServiceListDrives:
 
         assert result["total_drives"] == 1
         assert result["drives"][0]["name"] == "Team Drive"
-        mock_client.list_drives.assert_called_once_with(query="Team", max_results=5)
+        mock_client.list_drives.assert_called_once_with(
+            query="Team", max_results=5
+        )
+
     def test_client_initialization(
         self, mock_get_creds, mock_build, mock_credentials, mock_service
     ):
@@ -589,12 +620,14 @@ class TestGoogleDriveServiceListDrives:
         # Verify we build Drive v3 and Docs v1 services
         calls = mock_build.call_args_list
         assert any(
-            args[0] == ("drive", "v3") and (args[1].get("credentials") == mock_credentials)
-            for args in [call for call in (c for c in calls)]
+            args[0] == ("drive", "v3")
+            and (args[1].get("credentials") == mock_credentials)
+            for args in list(calls)
         )
         assert any(
-            args[0] == ("docs", "v1") and (args[1].get("credentials") == mock_credentials)
-            for args in [call for call in (c for c in calls)]
+            args[0] == ("docs", "v1")
+            and (args[1].get("credentials") == mock_credentials)
+            for args in list(calls)
         )
 
     @patch("google_mcp.gdrive_mcp.drive_client.build")
@@ -645,7 +678,7 @@ class TestGoogleDriveServiceListDrives:
         # Mock the files().create() chain
         mock_files = Mock()
         mock_create = Mock()
-        mock_execute = Mock()
+        Mock()
 
         mock_service.files.return_value = mock_files
         mock_files.create.return_value = mock_create
@@ -682,7 +715,7 @@ class TestGoogleDriveServiceListDrives:
         # Mock the files().get() chain
         mock_files = Mock()
         mock_get = Mock()
-        mock_execute = Mock()
+        Mock()
 
         mock_service.files.return_value = mock_files
         mock_files.get.return_value = mock_get
@@ -721,7 +754,7 @@ class TestGoogleDriveServiceListDrives:
         # Mock the permissions().create() chain
         mock_permissions = Mock()
         mock_create = Mock()
-        mock_execute = Mock()
+        Mock()
 
         mock_service.permissions.return_value = mock_permissions
         mock_permissions.create.return_value = mock_create
@@ -741,7 +774,11 @@ class TestGoogleDriveServiceListDrives:
         # Verify the API call
         mock_permissions.create.assert_called_once_with(
             fileId="file1",
-            body={"type": "user", "role": "writer", "emailAddress": "user@example.com"},
+            body={
+                "type": "user",
+                "role": "writer",
+                "emailAddress": "user@example.com",
+            },
             fields="id, emailAddress, role",
         )
 
@@ -760,7 +797,9 @@ class TestGoogleDriveServiceListDrives:
         mock_docs_documents = Mock()
         mock_docs_service.documents.return_value = mock_docs_documents
         mock_docs_get = Mock()
-        mock_docs_get.execute.return_value = {"body": {"content": [{"endIndex": 10}]}}
+        mock_docs_get.execute.return_value = {
+            "body": {"content": [{"endIndex": 10}]}
+        }
         mock_docs_documents.get.return_value = mock_docs_get
         mock_docs_batch = Mock()
         mock_docs_batch.execute.return_value = {}

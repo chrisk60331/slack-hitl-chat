@@ -62,7 +62,9 @@ def _jira_client():
       - JIRA_EMAIL
       - JIRA_API_TOKEN
     """
-    from jira import JIRA  # Imported lazily to avoid test import-time dependency
+    from jira import (
+        JIRA,
+    )  # Imported lazily to avoid test import-time dependency
 
     return JIRA(
         server=os.environ["JIRA_BASE_URL"],
@@ -113,7 +115,9 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
         "key": request.key,
         "name": request.name,
         "projectTypeKey": request.projectTypeKey,
-        "projectTemplateKey": _resolve_project_template_key(request.projectTemplateKey),
+        "projectTemplateKey": _resolve_project_template_key(
+            request.projectTemplateKey
+        ),
     }
     if lead_account_id:
         payload["leadAccountId"] = lead_account_id
@@ -129,12 +133,15 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
 
 class BulkIssueUploadRequest(BaseModel):
     projectKey: str
-    csv: str | None = Field(default=None, description="Raw CSV string or base64")
+    csv: str | None = Field(
+        default=None, description="Raw CSV string or base64"
+    )
     s3Url: str | None = Field(
         default=None, description="S3 URL (not supported in this server)"
     )
     dryRun: bool = Field(
-        default=False, description="If true, validate only and don't create issues"
+        default=False,
+        description="If true, validate only and don't create issues",
     )
     batchSize: int = Field(default=50, description="Bulk API batch size")
     defaults: dict[str, Any] = Field(
@@ -211,7 +218,7 @@ def _rows_to_issues(
     if rename_map:
         df = df.rename(rename_map)
 
-    headers = [c for c in df.columns]
+    headers = list(df.columns)
 
     # Helper to resolve a logical field name to an actual column name
     def resolve_column(logical_name: str, synonyms: list[str]) -> str | None:
@@ -232,7 +239,10 @@ def _rows_to_issues(
             block = block.rstrip("\r")
             if block:
                 paragraphs.append(
-                    {"type": "paragraph", "content": [{"type": "text", "text": block}]}
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": block}],
+                    }
                 )
             else:
                 paragraphs.append({"type": "paragraph"})
@@ -258,9 +268,12 @@ def _rows_to_issues(
         synonyms=["Acceptance Criteria"],
     )
     labels_col = resolve_column("Labels", synonyms=["Label", "Tags"])
-    components_col = resolve_column("Components", synonyms=["Component", "Component/s"])
+    components_col = resolve_column(
+        "Components", synonyms=["Component", "Component/s"]
+    )
     assignee_email_col = resolve_column(
-        "AssigneeEmail", synonyms=["Assignee", "Assignee Email", "Assignee email"]
+        "AssigneeEmail",
+        synonyms=["Assignee", "Assignee Email", "Assignee email"],
     )
 
     # Validate required columns after applying mappings/synonyms
@@ -306,7 +319,9 @@ def _rows_to_issues(
         if description_text_parts:
             description_adf = to_adf("\n\n".join(description_text_parts))
 
-        assignee_email = row.get(assignee_email_col) if assignee_email_col else None
+        assignee_email = (
+            row.get(assignee_email_col) if assignee_email_col else None
+        )
         labels = row.get(labels_col) if labels_col else None
         components = row.get(components_col) if components_col else None
 
@@ -314,10 +329,14 @@ def _rows_to_issues(
         if description_adf is not None:
             fields["description"] = description_adf
         if labels:
-            fields["labels"] = [s.strip() for s in str(labels).split(",") if s.strip()]
+            fields["labels"] = [
+                s.strip() for s in str(labels).split(",") if s.strip()
+            ]
         if components:
             fields["components"] = [
-                {"name": s.strip()} for s in str(components).split(",") if s.strip()
+                {"name": s.strip()}
+                for s in str(components).split(",")
+                if s.strip()
             ]
         if assignee_email:
             fields["assignee"] = {"emailAddress": assignee_email}
@@ -353,7 +372,9 @@ def bulk_issue_upload(request: BulkIssueUploadRequest) -> dict[str, Any]:
             raise ValueError("Provide csv, csvPath, or s3Url")
     if request.s3Url:
         # For simplicity, assume the caller resolved the CSV and passed its content in base64 string
-        raise ValueError("s3Url not supported in this minimal server; pass csv string")
+        raise ValueError(
+            "s3Url not supported in this minimal server; pass csv string"
+        )
     df: pl.DataFrame
     if request.csvPath:
         df = _load_csv_from_path(request.csvPath)
@@ -376,7 +397,12 @@ def bulk_issue_upload(request: BulkIssueUploadRequest) -> dict[str, Any]:
     warnings: list[str] = []
 
     if request.dryRun:
-        return {"created": 0, "issueKeys": [], "warnings": ["dryRun"], "errors": []}
+        return {
+            "created": 0,
+            "issueKeys": [],
+            "warnings": ["dryRun"],
+            "errors": [],
+        }
 
     batch = []
     for issue in issues:
@@ -392,7 +418,8 @@ def bulk_issue_upload(request: BulkIssueUploadRequest) -> dict[str, Any]:
 
                     time.sleep(2)
                     resp = jira._session.post(
-                        jira._get_url("issue/bulk"), json={"issueUpdates": batch}
+                        jira._get_url("issue/bulk"),
+                        json={"issueUpdates": batch},
                     )
                 resp.raise_for_status()
                 data = resp.json()
@@ -447,9 +474,13 @@ class DeleteProjectRequest(BaseModel):
     name="delete_project_issues",
     description="Delete issues in a Jira project (optionally filter by issueType or extra JQL). Use dryRun to preview.",
 )
-def delete_project_issues(request: DeleteProjectIssuesRequest) -> dict[str, Any]:
+def delete_project_issues(
+    request: DeleteProjectIssuesRequest,
+) -> dict[str, Any]:
     """Delete issues in a project using JQL paging with the modern search API. Returns counts and any errors."""
-    logger.info(f"Starting delete_project_issues for project: {request.projectKey}")
+    logger.info(
+        f"Starting delete_project_issues for project: {request.projectKey}"
+    )
 
     try:
         jira = _jira_client()
@@ -493,26 +524,40 @@ def delete_project_issues(request: DeleteProjectIssuesRequest) -> dict[str, Any]
                 "maxResults": request.maxBatch,
             }
 
-            resp = jira._session.get(search_url, params=search_params, headers=headers)
+            resp = jira._session.get(
+                search_url, params=search_params, headers=headers
+            )
 
             logger.debug(f"Search response status: {resp.status_code}")
 
             # Check for specific error responses
             if resp.status_code == 410:
-                logger.error(f"JIRA search API deprecated. Response: {resp.text}")
-                raise Exception(f"JIRA search API deprecated. Response: {resp.text}")
+                logger.error(
+                    f"JIRA search API deprecated. Response: {resp.text}"
+                )
+                raise Exception(
+                    f"JIRA search API deprecated. Response: {resp.text}"
+                )
             elif resp.status_code == 400:
                 logger.error(f"Invalid search request. Response: {resp.text}")
-                raise Exception(f"Invalid search request. Response: {resp.text}")
+                raise Exception(
+                    f"Invalid search request. Response: {resp.text}"
+                )
             elif resp.status_code == 404:
-                logger.error(f"Search endpoint not found. Response: {resp.text}")
-                raise Exception(f"Search endpoint not found. Response: {resp.text}")
+                logger.error(
+                    f"Search endpoint not found. Response: {resp.text}"
+                )
+                raise Exception(
+                    f"Search endpoint not found. Response: {resp.text}"
+                )
 
             resp.raise_for_status()
             logger.info("Primary search method (GET) successful")
 
         except Exception as search_error:
-            logger.warning(f"Primary search method (GET) failed: {search_error}")
+            logger.warning(
+                f"Primary search method (GET) failed: {search_error}"
+            )
 
             # Fallback: try using the POST version of the same endpoint
             try:
@@ -545,10 +590,14 @@ def delete_project_issues(request: DeleteProjectIssuesRequest) -> dict[str, Any]
                 try:
                     logger.info("Attempting final fallback method...")
                     # Try to get issues directly from the project
-                    project_url = jira._get_url(f"project/{request.projectKey}")
+                    project_url = jira._get_url(
+                        f"project/{request.projectKey}"
+                    )
                     project_resp = jira._session.get(project_url)
                     if project_resp.ok:
-                        logger.info("Project exists, trying alternative search method")
+                        logger.info(
+                            "Project exists, trying alternative search method"
+                        )
                         # If project exists, try a different search approach
                         raise Exception(
                             "Project exists but search API is not working. Please check JIRA API documentation for the latest search endpoint."
@@ -579,11 +628,15 @@ def delete_project_issues(request: DeleteProjectIssuesRequest) -> dict[str, Any]
                 logger.debug(f"Deleting issue: {key}")
                 del_resp = jira._session.delete(jira._get_url(f"issue/{key}"))
                 if del_resp.status_code == 429:
-                    logger.warning(f"Rate limited, waiting before retry for {key}")
+                    logger.warning(
+                        f"Rate limited, waiting before retry for {key}"
+                    )
                     import time
 
                     time.sleep(1)
-                    del_resp = jira._session.delete(jira._get_url(f"issue/{key}"))
+                    del_resp = jira._session.delete(
+                        jira._get_url(f"issue/{key}")
+                    )
                 del_resp.raise_for_status()
                 deleted.append(key)
                 logger.debug(f"Successfully deleted issue: {key}")
@@ -624,7 +677,9 @@ def delete_project(request: DeleteProjectRequest) -> dict[str, Any]:
         project_url = jira._get_url(f"project/{request.projectKey}")
         project_resp = jira._session.get(project_url)
         if not project_resp.ok:
-            raise Exception(f"Project {request.projectKey} not found or inaccessible")
+            raise Exception(
+                f"Project {request.projectKey} not found or inaccessible"
+            )
         logger.info(f"Project {request.projectKey} exists and is accessible")
     except Exception as e:
         logger.error(f"Failed to verify project existence: {e}")
@@ -652,7 +707,9 @@ def delete_project(request: DeleteProjectRequest) -> dict[str, Any]:
     logger.info(f"Step 2: Deleting project {request.projectKey}")
     try:
         if request.dryRun:
-            logger.info(f"Dry run mode - would delete project {request.projectKey}")
+            logger.info(
+                f"Dry run mode - would delete project {request.projectKey}"
+            )
             project_deleted = True
         else:
             # Delete the project using the project deletion endpoint
@@ -675,16 +732,22 @@ def delete_project(request: DeleteProjectRequest) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to delete project {request.projectKey}: {e}")
         if not request.forceDelete:
-            raise Exception(f"Failed to delete project {request.projectKey}: {e}")
-        logger.warning("Project deletion failed but forceDelete=True, continuing")
+            raise Exception(
+                f"Failed to delete project {request.projectKey}: {e}"
+            )
+        logger.warning(
+            "Project deletion failed but forceDelete=True, continuing"
+        )
         project_deleted = False
 
     result = {
         "projectKey": request.projectKey,
         "projectDeleted": project_deleted,
-        "issuesDeleted": issues_result.get("matched", 0)
-        if "issues_result" in locals()
-        else 0,
+        "issuesDeleted": (
+            issues_result.get("matched", 0)
+            if "issues_result" in locals()
+            else 0
+        ),
         "dryRun": request.dryRun,
         "forceDelete": request.forceDelete,
     }

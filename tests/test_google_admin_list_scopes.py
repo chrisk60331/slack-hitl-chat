@@ -23,7 +23,10 @@ def test_parse_scopes_from_tokeninfo_splits_and_sorts() -> None:
 
 class _FakeCredentials:
     def __init__(
-        self, token: str | None = None, valid: bool = False, expired: bool = True
+        self,
+        token: str | None = None,
+        valid: bool = False,
+        expired: bool = True,
     ) -> None:
         self.token = token
         self.valid = valid

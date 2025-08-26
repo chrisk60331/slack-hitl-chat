@@ -36,7 +36,7 @@ def _extract_text_from_result(result_obj: Any) -> str:
         if isinstance(result_obj, dict):
             # If nested under 'body' and is JSON string or object
             body = result_obj.get("body")
-            if isinstance(body, (dict, list)):
+            if isinstance(body, dict | list):
                 return json.dumps(body)[:3000]
             if isinstance(body, str):
                 return body[:3000]
@@ -63,7 +63,10 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
         or event.get("body", {}).get("request_id")
     )
     result_obj: Any = (
-        event.get("result") or event.get("execute_result") or event.get("body") or event
+        event.get("result")
+        or event.get("execute_result")
+        or event.get("body")
+        or event
     )
 
     if not request_id:
@@ -89,20 +92,29 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     except Exception:
         item = {}
 
-    channel_id: str | None = item.get("slack_channel") or item.get("channel_id")
+    channel_id: str | None = item.get("slack_channel") or item.get(
+        "channel_id"
+    )
     ts: str | None = item.get("slack_ts") or item.get("ts")
 
     if not channel_id or not ts:
         # No Slack metadata to update; consider success
         return {
             "statusCode": 200,
-            "body": {"ok": True, "updated": False, "reason": "no_slack_metadata"},
+            "body": {
+                "ok": True,
+                "updated": False,
+                "reason": "no_slack_metadata",
+            },
         }
 
     # Resolve token
     bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
     if not bot_token:
-        return {"statusCode": 200, "body": {"ok": False, "skipped": "no_token"}}
+        return {
+            "statusCode": 200,
+            "body": {"ok": False, "skipped": "no_token"},
+        }
 
     # Build text
     text = _extract_text_from_result(result_obj)

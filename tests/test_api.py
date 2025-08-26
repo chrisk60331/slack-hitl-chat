@@ -8,7 +8,9 @@ import pytest
 from src.api import app
 
 
-def _sign_slack_request(signing_secret: str, body: bytes, timestamp: str) -> str:
+def _sign_slack_request(
+    signing_secret: str, body: bytes, timestamp: str
+) -> str:
     import hashlib
     import hmac
 
@@ -22,7 +24,9 @@ def _sign_slack_request(signing_secret: str, body: bytes, timestamp: str) -> str
 @pytest.mark.asyncio
 async def test_healthz() -> None:
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as ac:
         resp = await ac.get("/healthz")
         assert resp.status_code == 200
         data = resp.json()
@@ -32,7 +36,9 @@ async def test_healthz() -> None:
 @pytest.mark.asyncio
 async def test_slack_interactions_signature_invalid() -> None:
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as ac:
         resp = await ac.post(
             "/slack/interactions",
             content=b"payload=%7B%22type%22%3A%22block_actions%22%7D",
@@ -46,7 +52,9 @@ async def test_slack_interactions_signature_invalid() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slack_interactions_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_slack_interactions_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Prepare payload
     payload = {
         "type": "block_actions",
@@ -90,7 +98,9 @@ async def test_slack_interactions_happy_path(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(sh.requests, "post", fake_post)
 
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as ac:
         resp = await ac.post(
             "/slack/interactions",
             content=form_body,

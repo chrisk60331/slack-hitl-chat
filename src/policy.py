@@ -43,7 +43,7 @@ class ApprovalCategory(str, Enum):
             ApprovalCategory.USER_ACCOUNT_ACCESS: 10,
             ApprovalCategory.AWS_ROLE_ACCESS: 8,
             ApprovalCategory.DOCUMENT_ACCESS_UPDATES: 10,
-            ApprovalCategory.DOCUMENT_CONTENT_UPDATES: 5    ,
+            ApprovalCategory.DOCUMENT_CONTENT_UPDATES: 5,
             ApprovalCategory.OTHER: 3,
         }
         return risk_map[self]
@@ -60,7 +60,9 @@ class ApprovalOutcome(str, Enum):
 class ProposedAction(BaseModel):
     """Structured description of a user/tool action to be executed."""
 
-    tool_name: str = Field(..., description="The name of the tool or operation")
+    tool_name: str = Field(
+        ..., description="The name of the tool or operation"
+    )
     description: str = Field(
         ..., description="Human-readable description of the intended action"
     )
@@ -72,7 +74,9 @@ class ProposedAction(BaseModel):
         default=None,
         description="Monetary amount or numeric threshold relevant to the action",
     )
-    environment: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT", "dev"))
+    environment: str = Field(
+        default_factory=lambda: os.getenv("ENVIRONMENT", "dev")
+    )
     user_id: str | None = Field(default=None)
     group_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -98,11 +102,19 @@ class PolicyRule(BaseModel):
         if self.environments and action.environment not in self.environments:
             return False
         if self.resource_prefixes and action.resource is not None:
-            if not any(action.resource.startswith(p) for p in self.resource_prefixes):
+            if not any(
+                action.resource.startswith(p) for p in self.resource_prefixes
+            ):
                 return False
-        if self.min_amount is not None and (action.amount or 0) < self.min_amount:
+        if (
+            self.min_amount is not None
+            and (action.amount or 0) < self.min_amount
+        ):
             return False
-        if self.max_amount is not None and (action.amount or 0) > self.max_amount:
+        if (
+            self.max_amount is not None
+            and (action.amount or 0) > self.max_amount
+        ):
             return False
         return True
 
@@ -196,7 +208,9 @@ class PolicyEngine:
 
 
 # Compiled regex to detect AWS IAM Role ARNs in free-form text
-_AWS_ROLE_ARN_REGEX = re.compile(r"arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_/-]+")
+_AWS_ROLE_ARN_REGEX = re.compile(
+    r"arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_/-]+"
+)
 
 
 def infer_category_and_resource(

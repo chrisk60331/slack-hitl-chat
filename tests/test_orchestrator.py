@@ -38,7 +38,9 @@ async def test_orchestrator_allow_short_circuit(monkeypatch: Any) -> None:
     # Patch MCPClient inside orchestrator
     monkeypatch.setattr("src.orchestrator.MCPClient", lambda: DummyClient())
 
-    req = OrchestratorRequest(user_id="u", query="hello world", environment="dev")
+    req = OrchestratorRequest(
+        user_id="u", query="hello world", environment="dev"
+    )
     result = await orch.run(req)
     assert result.status == "completed"
     assert isinstance(result.result, str)
@@ -54,11 +56,15 @@ async def test_orchestrator_infers_aws_role_access_requires_approval(
     def fake_start_approval(_):
         return "req-123"
 
-    def fake_wait_for_approval(_request_id: str, *_args: Any, **_kwargs: Any) -> str:
+    def fake_wait_for_approval(
+        _request_id: str, *_args: Any, **_kwargs: Any
+    ) -> str:
         return "reject"
 
     monkeypatch.setattr(
-        AgentOrchestrator, "_start_approval", lambda self, x: fake_start_approval(x)
+        AgentOrchestrator,
+        "_start_approval",
+        lambda self, x: fake_start_approval(x),
     )
     monkeypatch.setattr(
         AgentOrchestrator,

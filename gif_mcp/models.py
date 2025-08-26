@@ -1,6 +1,5 @@
 """Data models for GIF MCP Server."""
 
-
 from pydantic import BaseModel, Field
 
 
@@ -32,14 +31,18 @@ class GifResult(BaseModel):
     width: int = Field(..., description="Width of the GIF in pixels")
     height: int = Field(..., description="Height of the GIF in pixels")
     size: int | None = Field(None, description="File size in bytes")
-    source: str = Field(..., description="Source platform (e.g., 'giphy', 'tenor')")
+    source: str = Field(
+        ..., description="Source platform (e.g., 'giphy', 'tenor')"
+    )
 
 
 class SearchGifsResponse(BaseModel):
     """Response model for GIF search results."""
 
     gifs: list[GifResult] = Field(..., description="List of found GIFs")
-    total_count: int = Field(..., description="Total number of available results")
+    total_count: int = Field(
+        ..., description="Total number of available results"
+    )
     query: str = Field(..., description="Original search query")
     pagination: dict = Field(..., description="Pagination information")
 
@@ -55,11 +58,15 @@ class GetTrendingGifsRequest(BaseModel):
     """Request model for getting trending GIFs."""
 
     limit: int = Field(
-        default=10, ge=1, le=50, description="Maximum number of trending GIFs to return"
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum number of trending GIFs to return",
     )
     rating: str | None = Field(default="g", description="Content rating")
     time_period: str | None = Field(
-        default="day", description="Time period for trending (day, week, month)"
+        default="day",
+        description="Time period for trending (day, week, month)",
     )
 
 

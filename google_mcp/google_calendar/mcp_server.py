@@ -67,7 +67,10 @@ def freebusy(request: FreeBusyRequest) -> dict[str, Any]:
         raise ValueError("time_min and time_max must be ISO8601 with timezone")
     client = GoogleCalendarClient()
     return client.freebusy(
-        request.calendar_ids, request.time_min, request.time_max, request.timezone
+        request.calendar_ids,
+        request.time_min,
+        request.time_max,
+        request.timezone,
     )
 
 

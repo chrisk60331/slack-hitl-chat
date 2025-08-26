@@ -30,11 +30,15 @@ def test_invoke_with_retries_transient_then_success(monkeypatch):
             raise FakeClientError("ServiceUnavailableException")
         return {
             "body": type(
-                "B", (), {"read": lambda self: json.dumps({"content": []}).encode()}
+                "B",
+                (),
+                {"read": lambda self: json.dumps({"content": []}).encode()},
             )()
         }
 
-    monkeypatch.setattr(client, "_is_retryable_bedrock_error", fake_is_retryable)
+    monkeypatch.setattr(
+        client, "_is_retryable_bedrock_error", fake_is_retryable
+    )
     monkeypatch.setattr(client.bedrock, "invoke_model", fake_invoke_model)
 
     resp = client._invoke_with_retries(
@@ -58,7 +62,9 @@ def test_invoke_stream_with_retries_gives_up(monkeypatch):
     def fake_invoke_stream(*_args: Any, **_kwargs: Any):
         raise FakeClientError("ServiceUnavailableException")
 
-    monkeypatch.setattr(client, "_is_retryable_bedrock_error", fake_is_retryable)
+    monkeypatch.setattr(
+        client, "_is_retryable_bedrock_error", fake_is_retryable
+    )
     monkeypatch.setattr(
         client.bedrock, "invoke_model_with_response_stream", fake_invoke_stream
     )

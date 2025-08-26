@@ -81,12 +81,8 @@ def _build_slack_text(
             function_url = ""
         if function_url:
             request_id = content.get("request_id", "")
-            approve_link = (
-                f"{function_url}?request_id={request_id}&action={ApprovalOutcome.ALLOW}"
-            )
-            reject_link = (
-                f"{function_url}?request_id={request_id}&action={ApprovalOutcome.DENY}"
-            )
+            approve_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.ALLOW}"
+            reject_link = f"{function_url}?request_id={request_id}&action={ApprovalOutcome.DENY}"
             lines.extend(
                 [
                     "",
@@ -120,11 +116,18 @@ def post_slack_webhook_message(
     if not webhook_url:
         return False
 
-    text: str = _build_slack_text(content, function_url_getter=function_url_getter)
+    text: str = _build_slack_text(
+        content, function_url_getter=function_url_getter
+    )
     payload: dict[str, Any] = {"text": text}
 
-    response = requests.post(webhook_url, json=payload, timeout=timeout_seconds)
-    return response.status_code == 200 and response.text.strip().lower() in {"ok", ""}
+    response = requests.post(
+        webhook_url, json=payload, timeout=timeout_seconds
+    )
+    return response.status_code == 200 and response.text.strip().lower() in {
+        "ok",
+        "",
+    }
 
 
 __all__ = [
@@ -296,7 +299,9 @@ def verify_slack_request(
     return True
 
 
-def parse_action_from_interaction(payload: dict[str, Any]) -> tuple[str, str, str]:
+def parse_action_from_interaction(
+    payload: dict[str, Any],
+) -> tuple[str, str, str]:
     """Extract (request_id, action, user_id) from Slack interaction payload.
 
     Raises ValueError if required fields are missing.
@@ -314,7 +319,9 @@ def parse_action_from_interaction(payload: dict[str, Any]) -> tuple[str, str, st
     except Exception:
         parsed = {}
     request_id = (
-        parsed.get("request_id") or payload.get("container", {}).get("message_ts") or ""
+        parsed.get("request_id")
+        or payload.get("container", {}).get("message_ts")
+        or ""
     )
     action = parsed.get("action") or action
     if action not in {ApprovalOutcome.ALLOW, ApprovalOutcome.DENY}:

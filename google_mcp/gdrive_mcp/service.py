@@ -7,23 +7,25 @@ document search, creation, and management using the Google Drive API.
 import logging
 import os
 from typing import Any
+
 import dotenv
 
 from .drive_client import GoogleDriveClient
 from .models import (
-    CreateDocumentRequest,
     CopyDocumentRequest,
+    CreateDocumentRequest,
     DeleteDocumentRequest,
     GetDocumentRequest,
+    ListCustomerFilesRequest,
     ListDrivesRequest,
     ListFoldersRequest,
-    ListCustomerFilesRequest,
     SearchDocumentsRequest,
     UpdateDocumentRequest,
 )
 
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
+
 
 class GoogleDriveService:
     """Service for managing Google Drive operations."""
@@ -33,7 +35,9 @@ class GoogleDriveService:
         logger.info("Initializing Google Drive service")
         self.client = GoogleDriveClient()
 
-    def search_documents(self, request: SearchDocumentsRequest) -> dict[str, Any]:
+    def search_documents(
+        self, request: SearchDocumentsRequest
+    ) -> dict[str, Any]:
         """Search for documents in Google Drive.
 
         Args:
@@ -51,9 +55,7 @@ class GoogleDriveService:
             if text:
                 # Escape single quotes in user text per Drive query syntax
                 safe_text = text.replace("'", "\\'")
-                text_clause = (
-                    f"(name contains '{safe_text}' or fullText contains '{safe_text}')"
-                )
+                text_clause = f"(name contains '{safe_text}' or fullText contains '{safe_text}')"
             else:
                 text_clause = None
 
@@ -95,7 +97,9 @@ class GoogleDriveService:
             # Add trashed=false to exclude deleted files
             query_parts.append("trashed=false")
 
-            full_query = " and ".join(query_parts) if query_parts else "trashed=false"
+            full_query = (
+                " and ".join(query_parts) if query_parts else "trashed=false"
+            )
             logger.debug(f"Full search query: {full_query}")
 
             results = self.client.search_files(
@@ -139,7 +143,9 @@ class GoogleDriveService:
             logger.error(f"Error searching documents: {str(e)}")
             raise
 
-    def create_document(self, request: CreateDocumentRequest) -> dict[str, Any]:
+    def create_document(
+        self, request: CreateDocumentRequest
+    ) -> dict[str, Any]:
         """Create a new document in Google Drive.
 
         Args:
@@ -148,7 +154,9 @@ class GoogleDriveService:
         Returns:
             Dict containing the created document's details.
         """
-        logger.info(f"Creating {request.document_type} document: {request.title}")
+        logger.info(
+            f"Creating {request.document_type} document: {request.title}"
+        )
 
         try:
             # Create the document
@@ -160,18 +168,23 @@ class GoogleDriveService:
                 )
             elif request.document_type == "spreadsheet":
                 document = self.client.create_google_sheet(
-                    title=request.title, parent_folder_id=request.parent_folder_id
+                    title=request.title,
+                    parent_folder_id=request.parent_folder_id,
                 )
             elif request.document_type == "presentation":
                 document = self.client.create_google_slide(
-                    title=request.title, parent_folder_id=request.parent_folder_id
+                    title=request.title,
+                    parent_folder_id=request.parent_folder_id,
                 )
             elif request.document_type == "folder":
                 document = self.client.create_folder(
-                    title=request.title, parent_folder_id=request.parent_folder_id
+                    title=request.title,
+                    parent_folder_id=request.parent_folder_id,
                 )
             else:
-                raise ValueError(f"Unsupported document type: {request.document_type}")
+                raise ValueError(
+                    f"Unsupported document type: {request.document_type}"
+                )
 
             # Set permissions if specified
             if request.permissions:
@@ -208,7 +221,8 @@ class GoogleDriveService:
 
         try:
             file_info = self.client.get_file(
-                file_id=request.document_id, include_content=request.include_content
+                file_id=request.document_id,
+                include_content=request.include_content,
             )
 
             result = {
@@ -216,7 +230,8 @@ class GoogleDriveService:
                 "name": file_info["name"],
                 "mime_type": file_info["mimeType"],
                 "owners": [
-                    owner.get("emailAddress") for owner in file_info.get("owners", [])
+                    owner.get("emailAddress")
+                    for owner in file_info.get("owners", [])
                 ],
                 "created_time": file_info["createdTime"],
                 "modified_time": file_info["modifiedTime"],
@@ -241,7 +256,9 @@ class GoogleDriveService:
             logger.error(f"Error getting document: {str(e)}")
             raise
 
-    def update_document(self, request: UpdateDocumentRequest) -> dict[str, Any]:
+    def update_document(
+        self, request: UpdateDocumentRequest
+    ) -> dict[str, Any]:
         """Update an existing document in Google Drive.
 
         Args:
@@ -284,7 +301,9 @@ class GoogleDriveService:
                 for email in request.permissions:
                     if email not in current_permissions:
                         self.client.share_file(
-                            file_id=request.document_id, email=email, role="writer"
+                            file_id=request.document_id,
+                            email=email,
+                            role="writer",
                         )
 
             return {
@@ -296,7 +315,9 @@ class GoogleDriveService:
             logger.error(f"Error updating document: {str(e)}")
             raise
 
-    def delete_document(self, request: DeleteDocumentRequest) -> dict[str, Any]:
+    def delete_document(
+        self, request: DeleteDocumentRequest
+    ) -> dict[str, Any]:
         """Delete a document from Google Drive.
 
         Args:
@@ -427,7 +448,9 @@ class GoogleDriveService:
         logger.info("Listing shared drives")
 
         try:
-            drives = self.client.list_drives(query=request.query, max_results=request.max_results or 50)
+            drives = self.client.list_drives(
+                query=request.query, max_results=request.max_results or 50
+            )
 
             formatted_drives: list[dict[str, Any]] = []
             for drive in drives:
@@ -450,7 +473,9 @@ class GoogleDriveService:
             logger.error(f"Error listing shared drives: {str(e)}")
             raise
 
-    def list_customer_files(self, request: ListCustomerFilesRequest) -> dict[str, Any]:
+    def list_customer_files(
+        self, request: ListCustomerFilesRequest
+    ) -> dict[str, Any]:
         """List files for a given customer by navigating the customer folder hierarchy.
 
         The hierarchy is: CUSTOMER_ROOT -> LETTER_FOLDER -> CUSTOMER_FOLDER -> files/subfolders.
@@ -477,10 +502,10 @@ class GoogleDriveService:
 
         # Find the letter folder under the root
         folder_mime = "application/vnd.google-apps.folder"
-        letter_query = (
-            f"mimeType='{folder_mime}' and trashed=false and name='{first_letter}' and '{root_folder_id}' in parents"
+        letter_query = f"mimeType='{folder_mime}' and trashed=false and name='{first_letter}' and '{root_folder_id}' in parents"
+        letter_folders = self.client.search_files(
+            query=letter_query, max_results=1
         )
-        letter_folders = self.client.search_files(query=letter_query, max_results=1)
         if not letter_folders:
             raise FileNotFoundError(
                 f"Letter folder '{first_letter}' not found under customer root"
@@ -489,19 +514,23 @@ class GoogleDriveService:
 
         # Find the customer folder under the letter folder
         safe_customer = name.replace("'", "\\'")
-        customer_query = (
-            f"mimeType='{folder_mime}' and trashed=false and name='{safe_customer}' and '{letter_folder_id}' in parents"
+        customer_query = f"mimeType='{folder_mime}' and trashed=false and name='{safe_customer}' and '{letter_folder_id}' in parents"
+        customer_folders = self.client.search_files(
+            query=customer_query, max_results=1
         )
-        customer_folders = self.client.search_files(query=customer_query, max_results=1)
         if not customer_folders:
             raise FileNotFoundError(
                 f"Customer folder '{name}' not found under letter '{first_letter}'"
             )
         customer_folder_id = customer_folders[0]["id"]
 
-        include_owned_clause = " and 'me' in owners" if not request.include_shared else ""
+        include_owned_clause = (
+            " and 'me' in owners" if not request.include_shared else ""
+        )
 
-        def list_non_folder_files(parent_id: str, remaining: int) -> list[dict[str, Any]]:
+        def list_non_folder_files(
+            parent_id: str, remaining: int
+        ) -> list[dict[str, Any]]:
             if remaining <= 0:
                 return []
             # Exclude folders
@@ -509,12 +538,18 @@ class GoogleDriveService:
                 f"mimeType!='{folder_mime}' and trashed=false and '{parent_id}' in parents"
                 + include_owned_clause
             )
-            return self.client.search_files(query=files_query, max_results=remaining)
+            return self.client.search_files(
+                query=files_query, max_results=remaining
+            )
 
         files: list[dict[str, Any]] = []
 
         # Always list files directly under the customer folder first
-        files.extend(list_non_folder_files(customer_folder_id, request.max_results or 100))
+        files.extend(
+            list_non_folder_files(
+                customer_folder_id, request.max_results or 100
+            )
+        )
 
         # If recursive, traverse subfolders breadth-first and collect files
         if request.recursive and len(files) < (request.max_results or 100):
@@ -528,9 +563,7 @@ class GoogleDriveService:
                 visited.add(current_parent)
 
                 # Discover immediate subfolders
-                subfolder_query = (
-                    f"mimeType='{folder_mime}' and trashed=false and '{current_parent}' in parents"
-                )
+                subfolder_query = f"mimeType='{folder_mime}' and trashed=false and '{current_parent}' in parents"
                 subfolders = self.client.search_files(
                     query=subfolder_query,
                     max_results=100,
@@ -543,7 +576,9 @@ class GoogleDriveService:
                 # Collect files in this folder (non-folder)
                 remaining = (request.max_results or 100) - len(files)
                 if remaining > 0:
-                    files.extend(list_non_folder_files(current_parent, remaining))
+                    files.extend(
+                        list_non_folder_files(current_parent, remaining)
+                    )
 
         # Format response
         formatted_files: list[dict[str, Any]] = []
@@ -553,7 +588,10 @@ class GoogleDriveService:
                     "id": file.get("id"),
                     "name": file.get("name"),
                     "mime_type": file.get("mimeType"),
-                    "owners": [owner.get("emailAddress") for owner in file.get("owners", [])],
+                    "owners": [
+                        owner.get("emailAddress")
+                        for owner in file.get("owners", [])
+                    ],
                     "created_time": file.get("createdTime"),
                     "modified_time": file.get("modifiedTime"),
                     "size": file.get("size"),

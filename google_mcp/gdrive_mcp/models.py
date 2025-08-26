@@ -38,7 +38,8 @@ class CreateDocumentRequest(BaseModel):
         None, description="ID of the parent folder to create the document in"
     )
     content: str | None = Field(
-        None, description="Initial content for the document (for text-based documents)"
+        None,
+        description="Initial content for the document (for text-based documents)",
     )
     permissions: list[str] | None = Field(
         None, description="List of email addresses to share the document with"
@@ -50,7 +51,8 @@ class GetDocumentRequest(BaseModel):
 
     document_id: str = Field(..., description="Google Drive document ID")
     include_content: bool | None = Field(
-        False, description="Whether to include document content in the response"
+        False,
+        description="Whether to include document content in the response",
     )
 
 
@@ -59,9 +61,12 @@ class UpdateDocumentRequest(BaseModel):
 
     document_id: str = Field(..., description="Google Drive document ID")
     title: str | None = Field(None, description="New title for the document")
-    content: str | None = Field(None, description="New content for the document")
+    content: str | None = Field(
+        None, description="New content for the document"
+    )
     permissions: list[str] | None = Field(
-        None, description="List of email addresses to update sharing permissions with"
+        None,
+        description="List of email addresses to update sharing permissions with",
     )
 
 
@@ -81,7 +86,9 @@ class ListFoldersRequest(BaseModel):
     parent_folder_id: str | None = Field(
         None, description="ID of the parent folder to list contents from"
     )
-    max_results: int | None = Field(50, description="Maximum number of results to return")
+    max_results: int | None = Field(
+        50, description="Maximum number of results to return"
+    )
     include_shared: bool | None = Field(
         True, description="Whether to include shared folders"
     )
@@ -102,13 +109,19 @@ class ListDrivesRequest(BaseModel):
 class CopyDocumentRequest(BaseModel):
     """Request model for copying a document/file in Google Drive."""
 
-    source_document_id: str = Field(..., description="ID of the source document to copy")
-    new_title: str | None = Field(None, description="Optional new title for the copied document")
+    source_document_id: str = Field(
+        ..., description="ID of the source document to copy"
+    )
+    new_title: str | None = Field(
+        None, description="Optional new title for the copied document"
+    )
     destination_folder_id: str | None = Field(
-        None, description="Optional destination folder ID for the copied document"
+        None,
+        description="Optional destination folder ID for the copied document",
     )
     permissions: list[str] | None = Field(
-        None, description="Optional list of email addresses to share the copied document with"
+        None,
+        description="Optional list of email addresses to share the copied document with",
     )
 
 
@@ -122,13 +135,17 @@ class ListCustomerFilesRequest(BaseModel):
           - Files and subfolders
     """
 
-    customer_name: str = Field(..., description="Full customer name used as the folder name")
+    customer_name: str = Field(
+        ..., description="Full customer name used as the folder name"
+    )
     recursive: bool | None = Field(
-        False, description="If true, include files from all subfolders recursively"
+        False,
+        description="If true, include files from all subfolders recursively",
     )
     max_results: int | None = Field(
         100, description="Maximum number of results to return"
     )
     include_shared: bool | None = Field(
-        True, description="Whether to include files not owned by the service account"
+        True,
+        description="Whether to include files not owned by the service account",
     )

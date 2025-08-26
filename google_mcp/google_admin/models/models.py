@@ -36,7 +36,10 @@ class AddRoleRequest(BaseModel):
 
     user_key: str
     admin_role: Annotated[
-        str, StringConstraints(pattern=r"^arn:aws:iam::\d{12}:role/[a-zA-Z0-9_-]+$")
+        str,
+        StringConstraints(
+            pattern=r"^arn:aws:iam::\d{12}:role/[a-zA-Z0-9_-]+$"
+        ),
     ]
     identity_provider: Annotated[
         str,
@@ -51,7 +54,10 @@ class RemoveRoleRequest(BaseModel):
 
     user_key: str
     admin_role: Annotated[
-        str, StringConstraints(pattern=r"^arn:aws:iam::\d{12}:role/[a-zA-Z0-9_-]+$")
+        str,
+        StringConstraints(
+            pattern=r"^arn:aws:iam::\d{12}:role/[a-zA-Z0-9_-]+$"
+        ),
     ]
     identity_provider: Annotated[
         str,

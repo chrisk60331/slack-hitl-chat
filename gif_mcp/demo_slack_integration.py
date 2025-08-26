@@ -123,7 +123,9 @@ def demo_mcp_tool_responses():
 
             if search_result.gifs:
                 gif = search_result.gifs[0]
-                slack_message = service.format_for_slack(gif, params["message"])
+                slack_message = service.format_for_slack(
+                    gif, params["message"]
+                )
                 response = slack_message.model_dump()
             else:
                 response = {"error": "No GIFs found"}

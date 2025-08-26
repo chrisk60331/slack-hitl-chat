@@ -66,13 +66,17 @@ def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
     return True
 
 
-def _slack_api(method: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _slack_api(
+    method: str, token: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     url = f"https://slack.com/api/{method}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8",
     }
-    resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=10)
+    resp = requests.post(
+        url, data=json.dumps(payload), headers=headers, timeout=10
+    )
     try:
         return resp.json()
     except Exception:
@@ -92,7 +96,9 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
         return
 
     # 1) create message
-    post_url = f"{base_url.rstrip('/')}/gateway/v1/sessions/{session_id}/messages"
+    post_url = (
+        f"{base_url.rstrip('/')}/gateway/v1/sessions/{session_id}/messages"
+    )
     post = requests.post(
         post_url, json={"query": user_text, "user_id": "slack"}, timeout=30
     )
@@ -106,14 +112,18 @@ def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
 
     # 2) stream SSE with simple retry on 404 in case of race/placement
     base = base_url.rstrip("/")
-    stream_url = f"{base}/gateway/v1/sessions/{session_id}/stream?cursor={message_id}"
+    stream_url = (
+        f"{base}/gateway/v1/sessions/{session_id}/stream?cursor={message_id}"
+    )
 
     for attempt in range(2):
         with requests.get(stream_url, stream=True, timeout=300) as resp:
             if not resp.ok:
                 if resp.status_code == 404 and attempt == 0:
                     # Best-effort fallback: create a new message cursor and stream again
-                    post_url = f"{base}/gateway/v1/sessions/{session_id}/messages"
+                    post_url = (
+                        f"{base}/gateway/v1/sessions/{session_id}/messages"
+                    )
                     post = requests.post(
                         post_url,
                         json={"query": user_text, "user_id": "slack"},
@@ -167,7 +177,9 @@ def oauth_redirect_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     client_secret = secrets.get(
         "client_secret", os.environ.get("SLACK_CLIENT_SECRET", "")
     )
-    redirect_uri = secrets.get("redirect_uri", os.environ.get("SLACK_REDIRECT_URI", ""))
+    redirect_uri = secrets.get(
+        "redirect_uri", os.environ.get("SLACK_REDIRECT_URI", "")
+    )
 
     token_resp = requests.post(
         "https://slack.com/api/oauth.v2.access",
@@ -254,7 +266,10 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         print(
             f"request_id {compute_request_id_from_action(action_text)} found in table"
         )
-        return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "mode": "async"}),
+        }
     else:
         request_id = (
             _handle_new_approval_request(
@@ -340,11 +355,14 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         pass
     # Always post initial message once
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
-    ts = initial.get("ts") or (thread_ts if event_obj.get("thread_ts") else None)
+    ts = initial.get("ts") or (
+        thread_ts if event_obj.get("thread_ts") else None
+    )
 
     try:
         boto3.client(
-            "stepfunctions", region_name=os.environ.get("AWS_REGION", "us-west-2")
+            "stepfunctions",
+            region_name=os.environ.get("AWS_REGION", "us-west-2"),
         ).start_execution(
             stateMachineArn=os.environ.get("STATE_MACHINE_ARN", ""),
             input=json.dumps(
@@ -373,7 +391,10 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         print(f"Error: {e}")
 
     # Ack immediately for async path
-    return {"statusCode": 200, "body": json.dumps({"ok": True, "mode": "async"})}
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"ok": True, "mode": "async"}),
+    }
 
 
 def _worker_stream_handler(event: dict[str, Any]) -> None:
@@ -384,7 +405,7 @@ def _worker_stream_handler(event: dict[str, Any]) -> None:
     `session_id`, `message_ts`, and `secret_name`.
     """
     channel_id = str(event.get("channel_id", ""))
-    thread_ts = str(event.get("thread_ts", ""))
+    str(event.get("thread_ts", ""))
     user_text = str(event.get("user_text", ""))
     session_id = str(event.get("session_id", ""))
     ts = event.get("message_ts")
@@ -445,7 +466,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_context = event.get("requestContext", {})
     http = request_context.get("http", {})
     method = (http.get("method") or event.get("httpMethod") or "").upper()
-    raw_path = http.get("path") or event.get("rawPath") or event.get("path") or ""
+    raw_path = (
+        http.get("path") or event.get("rawPath") or event.get("path") or ""
+    )
 
     if method == "GET" and raw_path.endswith("/oauth/callback"):
         return oauth_redirect_handler(event, context)
@@ -457,7 +480,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     ):
         try:
             _worker_stream_handler(
-                event.get("body") if raw_path.endswith("/events/worker") else event
+                event.get("body")
+                if raw_path.endswith("/events/worker")
+                else event
             )
         except Exception:
             pass
@@ -465,7 +490,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     return {
         "statusCode": 404,
-        "body": json.dumps({"error": "not found", "path": raw_path, "method": method}),
+        "body": json.dumps(
+            {"error": "not found", "path": raw_path, "method": method}
+        ),
     }
 
 

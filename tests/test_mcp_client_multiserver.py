@@ -1,4 +1,3 @@
-
 import pytest
 
 from src.mcp_client import MCPClient

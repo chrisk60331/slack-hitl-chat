@@ -39,7 +39,9 @@ class OrchestratorRequest(BaseModel):
     category: str | None = None
     resource: str | None = None
     amount: float | None = None
-    environment: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT", "dev"))
+    environment: str = Field(
+        default_factory=lambda: os.getenv("ENVIRONMENT", "dev")
+    )
 
 
 class OrchestratorResult(BaseModel):
@@ -94,9 +96,11 @@ class AgentOrchestrator:
         proposed = ProposedAction(
             tool_name=request.tool_name or "auto",
             description=request.query,
-            category=self._coerce_category(request.category)
-            if request.category
-            else inferred_category,
+            category=(
+                self._coerce_category(request.category)
+                if request.category
+                else inferred_category
+            ),
             resource=request.resource or inferred_resource,
             amount=request.amount,
             environment=request.environment,
@@ -108,7 +112,9 @@ class AgentOrchestrator:
         print(f"Decision: {decision}")
 
         if decision.outcome == ApprovalOutcome.DENY:
-            return OrchestratorResult(status="denied", message=decision.rationale)
+            return OrchestratorResult(
+                status="denied", message=decision.rationale
+            )
 
         if decision.outcome == ApprovalOutcome.ALLOW:
             return await self._execute_direct(request)
@@ -132,7 +138,9 @@ class AgentOrchestrator:
         result.request_id = request_id
         return result
 
-    async def _execute_direct(self, request: OrchestratorRequest) -> OrchestratorResult:
+    async def _execute_direct(
+        self, request: OrchestratorRequest
+    ) -> OrchestratorResult:
         """Execute the request through the MCP client directly."""
 
         prompt_prefix = self.memory.as_prompt_prefix()
@@ -156,7 +164,9 @@ class AgentOrchestrator:
                 if alias_to_path:
                     await client.connect_to_servers(alias_to_path)
             else:
-                await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
+                await client.connect_to_server(
+                    "google_mcp/google_admin/mcp_server.py"
+                )
             response_text = await client.process_query(full_query)
         finally:
             await client.cleanup()
@@ -230,7 +240,10 @@ class AgentOrchestrator:
         return "sfn-exec"
 
     def _wait_for_approval(
-        self, request_id: str, timeout_seconds: int = 1800, poll_interval: int = 10
+        self,
+        request_id: str,
+        timeout_seconds: int = 1800,
+        poll_interval: int = 10,
     ) -> str:
         """Poll approval status in DynamoDB via approval_handler helper."""
 

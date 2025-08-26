@@ -25,13 +25,22 @@ def test_add_role_request_invalid_missing_fields():
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("admin_role", "arn:aws:iam::123:role/Admin"),  # too short account digits
-        ("admin_role", "arn:aws:iam::123456789012:role/Invalid Space"),  # space
+        (
+            "admin_role",
+            "arn:aws:iam::123:role/Admin",
+        ),  # too short account digits
+        (
+            "admin_role",
+            "arn:aws:iam::123456789012:role/Invalid Space",
+        ),  # space
         (
             "identity_provider",
             "arn:aws:iam::123456789012:saml-provider/Invalid*",
         ),  # invalid char
-        ("identity_provider", "arn:aws:iam::123:saml-provider/GoogleIdP"),  # short
+        (
+            "identity_provider",
+            "arn:aws:iam::123:saml-provider/GoogleIdP",
+        ),  # short
     ],
 )
 def test_add_role_request_invalid_arn_formats(field, value):

@@ -12,7 +12,7 @@ def test_base32_decode_padding():
     # "JBSWY3DPEHPK3PXP" is base32 for "Hello!\xde\xad\xbe\xef" shortened example
     # We just check that no exception and bytes length > 0
     decoded = _base32_decode_no_padding("JBSWY3DPEHPK3PXP")
-    assert isinstance(decoded, (bytes, bytearray)) and len(decoded) > 0
+    assert isinstance(decoded, bytes | bytearray) and len(decoded) > 0
 
 
 def test_hotp_known_vector():
@@ -26,7 +26,10 @@ def test_totp_fixed_time():
     # Using base32 for "12345678901234567890"
     base32_secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
     # At unix time 59 with 30s period: RFC 6238 TOTP = 287082 for SHA1 and 6 digits (counter=1)
-    assert _totp_from_base32(base32_secret, period=30, digits=6, now=59) == "287082"
+    assert (
+        _totp_from_base32(base32_secret, period=30, digits=6, now=59)
+        == "287082"
+    )
 
 
 def test_extract_base32_secret_from_json():
