@@ -66,6 +66,16 @@ uv run ruff check
 uv run ruff format
 ```
 
+### Slack Block Kit in Completion Notifications
+
+When an approved action completes, the completion notifier updates the original Slack message. If the execution result contains a `blocks` array (Slack Block Kit), those blocks will be used. Otherwise, a simple mrkdwn section block is synthesized from the result text so updates always use Block Kit.
+
+Set the bot token:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+```
+
 ### Building and Testing Lambda Functions
 
 ```bash

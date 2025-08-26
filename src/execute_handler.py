@@ -13,6 +13,7 @@ import sys
 import traceback
 from datetime import UTC, datetime
 from typing import Any
+from pprint import pprint   
 
 import boto3
 from pydantic import BaseModel, Field
@@ -23,7 +24,7 @@ from src.mcp_client import MCPClient
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.ERROR,
     format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -75,7 +76,7 @@ class ExecutionResult(BaseModel):
     )
 
 
-async def invoke_mcp_client(action_text: str):
+async def invoke_mcp_client(action_text: str, requester_email: str = None):
     client = MCPClient()
     try:
         # Prefer multi-server configuration when provided
@@ -83,17 +84,19 @@ async def invoke_mcp_client(action_text: str):
         if servers_env:
             alias_to_path: dict[str, str] = {}
             for part in servers_env.split(";"):
+                logger.error(f"part: {part} requester_email: {requester_email}")
                 if not part or "=" not in part:
                     continue
                 alias, path = part.split("=", 1)
                 alias_to_path[alias.strip()] = path.strip()
             if alias_to_path:
-                await client.connect_to_servers(alias_to_path)
+                await client.connect_to_servers(alias_to_path, requester_email)
         else:
             await client.connect_to_server(
-                "google_mcp/google_admin/mcp_server.py"
+                "google_mcp/google_admin/mcp_server.py",
+                requester_email
             )
-        result = await client.process_query(action_text)
+        result = await client.process_query(action_text, requester_email)
     finally:
         await client.cleanup()
     return result
@@ -110,6 +113,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Returns:
         Response dictionary with execution results
     """
+
     try:
         logger.info(
             f"Execute Lambda received event: {json.dumps(event, default=str)}"
@@ -147,12 +151,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     f"Request {execution_request.request_id} is not approved (status: {approval_item.approval_status})"
                 )
             elif approval_item.approval_status == "approve":
+                
+                
                 action_text = approval_item.proposed_action
                 request_id = execution_request.request_id or "direct_execution"
-                logger.info(
-                    f"Executing action for request {request_id}: {action_text}"
+                logger.error(
+                    f"Executing action for request {request_id} on behalf of {approval_item.requester}: {action_text}"
                 )
-                response_body = asyncio.run(invoke_mcp_client(action_text))
+                response_body = asyncio.run(invoke_mcp_client(action_text, approval_item.requester))
                 table.update_item(
                     Key={"request_id": request_id},
                     UpdateExpression="SET completion_status = :status, completion_message = :message",
@@ -200,3 +206,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
             "body": error_response,
         }
+
+
+if __name__ == "__main__":
+    pprint(lambda_handler(
+        {
+            "body": (
+                '{'
+                    '"execution_timeout": 300,'
+                    '"request_id": "cde914de3cebb4d18c35fb19231089921c3811766d8abd7b416f478627d92569"'
+                '}'
+            )
+        },
+        {},
+    ))

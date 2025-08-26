@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-load_dotenv()  # load environment variables from .env
+# load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -84,9 +84,7 @@ class MCPClient:
         # Network and timeout issues
         if isinstance(
             exc,
-            botocore_exceptions.ReadTimeoutError
-            | botocore_exceptions.ConnectTimeoutError
-            | botocore_exceptions.EndpointConnectionError,
+            botocore_exceptions.ReadTimeoutError | botocore_exceptions.ConnectTimeoutError | botocore_exceptions.EndpointConnectionError,
         ):
             return True
         # API-level errors
@@ -266,7 +264,7 @@ class MCPClient:
             mapping[alias.strip()] = os.path.expanduser(path.strip())
         return mapping
 
-    async def connect_to_servers(self, alias_to_path: dict[str, str]) -> None:
+    async def connect_to_servers(self, alias_to_path: dict[str, str], requester_email: str) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
         Args:
@@ -282,8 +280,9 @@ class MCPClient:
                 )
 
             command = "python" if is_python else "node"
+            logger.error(f"Connecting to server {server_script_path} with requester email {requester_email}")
             server_params = StdioServerParameters(
-                command=command, args=[server_script_path], env=None
+                command=command, args=[server_script_path, requester_email], env=None
             )
             logger.info(
                 "mcp.connect.begin",
@@ -312,7 +311,7 @@ class MCPClient:
                 extra={"alias": alias, "tool_count": len(response.tools)},
             )
 
-    async def process_query(self, query: str) -> str:
+    async def process_query(self, query: str, requester_email: str = None) -> str:
         """Process a query using Claude on Bedrock and available tools.
 
         Args:
@@ -328,7 +327,7 @@ class MCPClient:
             if servers_env:
                 mapping = self._parse_servers_env(servers_env)
                 if mapping:
-                    await self.connect_to_servers(mapping)
+                    await self.connect_to_servers(mapping, requester_email)
         messages = [
             {"role": "user", "content": [{"type": "text", "text": query}]}
         ]
@@ -402,7 +401,7 @@ class MCPClient:
                 for content in assistant_content
                 if content.get("type") == "tool_use"
             ]
-            logger.info("mcp.tool_calls", extra={"count": len(tool_calls)})
+            logger.debug("mcp.tool_calls", extra={"count": len(tool_calls)})
 
             if not tool_calls:
                 # No tool calls, extract and return the final response

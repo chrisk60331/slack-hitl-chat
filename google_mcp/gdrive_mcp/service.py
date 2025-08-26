@@ -8,8 +8,6 @@ import logging
 import os
 from typing import Any
 
-import dotenv
-
 from .drive_client import GoogleDriveClient
 from .models import (
     CopyDocumentRequest,
@@ -24,16 +22,14 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-dotenv.load_dotenv()
-
 
 class GoogleDriveService:
     """Service for managing Google Drive operations."""
 
-    def __init__(self):
+    def __init__(self, requester_email: str = None):
         """Initialize the Google Drive service."""
         logger.info("Initializing Google Drive service")
-        self.client = GoogleDriveClient()
+        self.client = GoogleDriveClient(requester_email=requester_email)
 
     def search_documents(
         self, request: SearchDocumentsRequest

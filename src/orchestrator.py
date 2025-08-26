@@ -162,12 +162,12 @@ class AgentOrchestrator:
                     alias, path = part.split("=", 1)
                     alias_to_path[alias.strip()] = path.strip()
                 if alias_to_path:
-                    await client.connect_to_servers(alias_to_path)
+                    await client.connect_to_servers(alias_to_path, request.user_id)
             else:
                 await client.connect_to_server(
                     "google_mcp/google_admin/mcp_server.py"
                 )
-            response_text = await client.process_query(full_query)
+            response_text = await client.process_query(full_query, request.user_id)
         finally:
             await client.cleanup()
 

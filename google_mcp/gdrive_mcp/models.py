@@ -104,6 +104,10 @@ class ListDrivesRequest(BaseModel):
     max_results: int | None = Field(
         50, description="Maximum number of shared drives to return"
     )
+    requester_email: str | None = Field(
+        None,
+        description="Email address of the requester",
+    )
 
 
 class CopyDocumentRequest(BaseModel):

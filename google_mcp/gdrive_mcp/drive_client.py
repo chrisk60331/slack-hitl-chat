@@ -6,6 +6,7 @@ including file operations, search, and content management.
 
 import logging
 from typing import Any
+import os
 
 from fastapi import HTTPException
 from google.oauth2.credentials import Credentials
@@ -19,13 +20,14 @@ logger = logging.getLogger(__name__)
 class GoogleDriveClient:
     """Client for interacting with Google Drive API."""
 
-    def __init__(self):
+    def __init__(self, requester_email: str = None):
         """Initialize the Google Drive client."""
         logger.debug("Getting Google Drive credentials")
-        self.credentials: Credentials = get_google_credentials()
-        self.service = build("drive", "v3", credentials=self.credentials)
         # Docs API client for content edits
+        self.credentials: Credentials = get_google_credentials()
+        self.credentials._subject = requester_email
         self.docs_service = build("docs", "v1", credentials=self.credentials)
+        self.service = build("drive", "v3", credentials=self.credentials)
 
     def search_files(
         self, query: str, max_results: int = 10
@@ -72,6 +74,7 @@ class GoogleDriveClient:
         """List shared drives the service account can access.
 
         Args:
+            requester_email: Email address of the requester.
             query: Optional name filter; when provided, only drives whose name contains this value will be returned (case-insensitive).
             max_results: Maximum number of shared drives to return.
 

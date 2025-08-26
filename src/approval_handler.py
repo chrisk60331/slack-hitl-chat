@@ -97,20 +97,16 @@ if os.getenv("LOCAL_DEV", "false") == "true":
     }
 else:
     ddb_params = {}
-
 # Initialize AWS clients
 dynamodb = boto3.resource(
     "dynamodb", region_name=os.environ["AWS_REGION"], **ddb_params
 )
 sns = boto3.client("sns", region_name=os.environ["AWS_REGION"])
-
 # Configuration
 TABLE_NAME = os.environ["TABLE_NAME"]
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 # Optional webhook integrations
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
-TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
-
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -591,7 +587,7 @@ def send_notifications(
             notification_sent = True
             print(f"SNS notification sent for request {request_id}")
     except Exception as e:
-        print(f"Error sending SNS notification: {e}")
+        print(f"Error sending SNS notification to {SNS_TOPIC_ARN}: {e}")
 
     return notification_sent
 

@@ -176,6 +176,11 @@
                   "type": "integer",
                   "default": 50,
                   "description": "Maximum number of shared drives to return"
+                },
+                "requester_email": {
+                  "type": "string",
+                  "default": 50,
+                  "description": "requester email address"
                 }
               }
             }

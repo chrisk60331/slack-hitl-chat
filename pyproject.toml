@@ -37,6 +37,7 @@ dependencies = [
     "pydantic-ai>=0.0.12",
     # GIF MCP dependencies
     "pillow>=10.0.0",
+    "slack-sdk>=3.36.0",
 ]
 
 [project.optional-dependencies]

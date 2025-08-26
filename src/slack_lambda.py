@@ -25,15 +25,15 @@ from typing import Any
 
 import boto3
 import requests
+from slack_sdk import WebClient
 
+from .secrets_manager import get_secret_json
+from .slack_session_store import SlackSessionStore
 from src.approval_handler import (
     _handle_new_approval_request,
     compute_request_id_from_action,
 )
 from src.mcp_client import MCPClient
-
-from .secrets import get_secret_json
-from .slack_session_store import SlackSessionStore
 
 # In-memory best-effort dedupe for local/dev. In AWS, prefer DynamoDB.
 _SEEN_EVENT_IDS: set[str] = set()
@@ -213,12 +213,24 @@ def oauth_redirect_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     }
 
 
+
+def slack_userid_to_email(user_id: str, bot_token: str) -> str | None:
+    try:
+        client = WebClient(token=bot_token)
+        resp = client.users_info(user=user_id)
+        return f"{resp['user']['name']}@{os.environ.get('DOMAIN', '')}"
+    except Exception as e:
+        print(f"SlackApiError: {e}")
+        return None
+
+
 def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Handle Slack Events and route to AgentCore.
 
     Supports URL verification and message events. Streams responses back by posting
     an initial message and editing it with incremental content.
     """
+    print(f"event: {event}")
     raw_body: bytes
     if "isBase64Encoded" in event and event.get("isBase64Encoded"):
         raw_body = base64.b64decode(event.get("body") or b"")
@@ -229,7 +241,8 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     secret_name = os.environ.get("SLACK_SECRETS_NAME", "")
     secrets = get_secret_json(secret_name) if secret_name else {}
     body = json.loads(raw_body.decode("utf-8") or "{}")
-
+    user = body.get("event", {}).get("user", "")
+    print(f"user: {user}")
     # URL verification challenge
     if body.get("type") == "url_verification":
         print(
@@ -262,6 +275,9 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     user_text = event_obj.get("text", "")
     action_text = event_obj.get("text", "")
     request_id = compute_request_id_from_action(action_text)
+    requester_email = slack_userid_to_email(user, os.environ.get("SLACK_BOT_TOKEN", ""))
+    print(f"requester_email: {requester_email}")
+
     if table.get_item(Key={"request_id": request_id}).get("Item"):
         print(
             f"request_id {compute_request_id_from_action(action_text)} found in table"
@@ -277,6 +293,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "slack_channel": channel_id,
                     "slack_ts": thread_ts,
                     "proposed_action": action_text,
+                    "requester": requester_email,
                 }
             )
             .get("body")
@@ -318,8 +335,8 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Resolve bot token from Secrets (or env fallback)
     bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
-
     if not bot_token:
+        print("missing bot token")
         return {"statusCode": 500, "body": "missing bot token"}
 
     # Map to session
@@ -371,6 +388,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "slack_channel": channel_id,
                     "slack_ts": ts,
                     "request_id": request_id,
+                    "requester": requester_email,
                 }
             ),
         )
@@ -504,3 +522,7 @@ async def invoke_mcp_client(action_text: str):
     finally:
         await client.cleanup()
     return result
+
+
+if __name__ == "__main__":
+    events_handler({'version': '2.0', 'routeKey': 'POST /events', 'rawPath': '/events', 'rawQueryString': '', 'headers': {'accept': '*/*', 'accept-encoding': 'gzip,deflate', 'content-length': '1528', 'content-type': 'application/json', 'host': '2hbb4kfbbj.execute-api.us-west-2.amazonaws.com', 'user-agent': 'Slackbot 1.0 (+https://api.slack.com/robots)', 'x-amzn-trace-id': 'Root=1-68add4ee-600007363f0cd26e18ecf6c4', 'x-forwarded-for': '3.238.237.63', 'x-forwarded-port': '443', 'x-forwarded-proto': 'https', 'x-slack-request-timestamp': '1756222701', 'x-slack-retry-num': '2', 'x-slack-retry-reason': 'http_timeout', 'x-slack-signature': 'v0=e231bb74179f1430283e1634b77580a7ec15d1119ccc23adc493acddb00435e6'}, 'requestContext': {'accountId': '706146613458', 'apiId': '2hbb4kfbbj', 'domainName': '2hbb4kfbbj.execute-api.us-west-2.amazonaws.com', 'domainPrefix': '2hbb4kfbbj', 'http': {'method': 'POST', 'path': '/events', 'protocol': 'HTTP/1.1', 'sourceIp': '3.238.237.63', 'userAgent': 'Slackbot 1.0 (+https://api.slack.com/robots)'}, 'requestId': 'P641QismvHcEJGw=', 'routeKey': 'POST /events', 'stage': '$default', 'time': '26/Aug/2025:15:38:22 +0000', 'timeEpoch': 1756222702016}, 'body': '{"token":"9CleupMsGtzkWxPEawni1VeZ","team_id":"TMS5FH9DY","api_app_id":"A09A5LF57K6","event":{"user":"U05510F01QR","type":"app_mention","ts":"1756222632.727899","client_msg_id":"29182cf5-675d-4999-8dc1-b6b80c695d7d","text":"hey <@U099WCH3GM9> please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another.","team":"TMS5FH9DY","blocks":[{"type":"rich_text","block_id":"UtW1f","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":" hey "},{"type":"user","user_id":"U099WCH3GM9"},{"type":"text","text":" please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another."}]}]}],"language":{"locale":"en","is_reliable":true},"channel":"C09BDA1E0HJ","event_ts":"1756222632.727899"},"type":"event_callback","event_id":"Ev09CHNCQS5P","event_time":1756222632,"authorizations":[{"enterprise_id":null,"team_id":"TMS5FH9DY","user_id":"U099WCH3GM9","is_bot":true,"is_enterprise_install":false}],"is_ext_shared_channel":false,"event_context":"4-eyJldCI6ImFwcF9tZW50aW9uIiwidGlkIjoiVE1TNUZIOURZIiwiYWlkIjoiQTA5QTVMRjU3SzYiLCJjaWQiOiJDMDlCREExRTBISiJ9"}', 'isBase64Encoded': False}, {})

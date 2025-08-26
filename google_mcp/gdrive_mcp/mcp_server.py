@@ -6,8 +6,8 @@ document search, creation, and management using FastMCP.
 
 import os
 import sys
+import logging
 
-import dotenv
 from fastmcp import FastMCP
 from fastmcp.server.auth import BearerAuthProvider
 from fastmcp.server.auth.providers.bearer import RSAKeyPair
@@ -32,7 +32,6 @@ from gdrive_mcp.service import GoogleDriveService
 
 # Generate a new key pair for development/testing
 key_pair = RSAKeyPair.generate()
-dotenv.load_dotenv()
 # Configure the auth provider with the public key (optional for stdio)
 auth = BearerAuthProvider(
     public_key=key_pair.public_key,
@@ -48,8 +47,8 @@ mcp = FastMCP(
 )
 
 # Initialize service
-drive_service = GoogleDriveService()
-
+drive_service = GoogleDriveService(requester_email=sys.argv[1])
+logging.error(f"sys args: {sys.argv}")
 
 @mcp.tool(
     name="search_documents",
@@ -186,10 +185,12 @@ def list_folders(request: ListFoldersRequest) -> dict:
             parent_folder_id (str, optional): ID of the parent folder to list contents from.
             max_results (int, optional): Maximum number of results to return.
             include_shared (bool, optional): Whether to include shared folders.
+            requester_email (str, optional): Email address of the requester.
 
     Returns:
         dict: List of folders with metadata.
     """
+    print(f"list_folders request: {request}")
     return drive_service.list_folders(request)
 
 
@@ -206,10 +207,13 @@ def list_drives(request: ListDrivesRequest) -> dict:
         request (ListDrivesRequest):
             query (str, optional): Optional name filter; matched with name contains when provided.
             max_results (int, optional): Maximum number of shared drives to return.
+            requester_email (str, optional): Email address of the requester.
 
     Returns:
         dict: List of shared drives with metadata.
     """
+    logging.error(f"list_drives request: {request}")
+
     return drive_service.list_drives(request)
 
 
