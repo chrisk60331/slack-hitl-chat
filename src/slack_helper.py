@@ -1,18 +1,7 @@
-"""Slack integration helper utilities.
+"""Deprecated module kept for backward compatibility in tests.
 
-This module centralizes Slack-related functionality so that other modules
-can remain agnostic of Slack specifics. It currently supports posting
-simple webhook messages. A future iteration will add Block Kit interactive
-messages and an interactivity endpoint.
-
-Design goals:
-- Keep a small, testable surface area
-- Avoid importing application modules to prevent circular dependencies
-
-Usage:
-- Use `post_slack_webhook_message` to send a basic text message to Slack.
-- Provide an optional `function_url_getter` to resolve approval action links
-  (kept optional to avoid hard coupling and enable easy testing).
+All new Slack interactions must use `src.slack_blockkit`.
+The webhook-based helpers here remain to satisfy existing tests only.
 """
 
 from __future__ import annotations

@@ -12,10 +12,9 @@ import os
 import sys
 import traceback
 from datetime import UTC, datetime
+from pprint import pprint
 from typing import Any
-from pprint import pprint   
 
-import boto3
 from pydantic import BaseModel, Field
 
 from src.approval_handler import COMPLETION_STATUS, get_approval_status
@@ -33,21 +32,10 @@ logging.basicConfig(
 logging.getLogger("pydantic_ai").setLevel(logging.DEBUG)
 logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
-# Initialize AWS clients
-if os.getenv("LOCAL_DEV", "false") == "true":
-    ddb_params = {
-        "endpoint_url": "http://agentcore-dynamodb-local:8000",
-        "aws_access_key_id": "test",
-        "aws_secret_access_key": "test",
-    }
-else:
-    ddb_params = {}
+from src.dynamodb_utils import get_approval_table
 
-dynamodb = boto3.resource(
-    "dynamodb", region_name=os.environ["AWS_REGION"], **ddb_params
-)
-TABLE_NAME = os.environ["TABLE_NAME"]
-table = dynamodb.Table(TABLE_NAME)
+# Centralized DynamoDB table handle
+table = get_approval_table()
 
 
 class ExecutionRequest(BaseModel):
@@ -84,7 +72,9 @@ async def invoke_mcp_client(action_text: str, requester_email: str = None):
         if servers_env:
             alias_to_path: dict[str, str] = {}
             for part in servers_env.split(";"):
-                logger.error(f"part: {part} requester_email: {requester_email}")
+                logger.error(
+                    f"part: {part} requester_email: {requester_email}"
+                )
                 if not part or "=" not in part:
                     continue
                 alias, path = part.split("=", 1)
@@ -93,8 +83,7 @@ async def invoke_mcp_client(action_text: str, requester_email: str = None):
                 await client.connect_to_servers(alias_to_path, requester_email)
         else:
             await client.connect_to_server(
-                "google_mcp/google_admin/mcp_server.py",
-                requester_email
+                "google_mcp/google_admin/mcp_server.py", requester_email
             )
         result = await client.process_query(action_text, requester_email)
     finally:
@@ -151,14 +140,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     f"Request {execution_request.request_id} is not approved (status: {approval_item.approval_status})"
                 )
             elif approval_item.approval_status == "approve":
-                
-                
                 action_text = approval_item.proposed_action
                 request_id = execution_request.request_id or "direct_execution"
                 logger.error(
                     f"Executing action for request {request_id} on behalf of {approval_item.requester}: {action_text}"
                 )
-                response_body = asyncio.run(invoke_mcp_client(action_text, approval_item.requester))
+                response_body = asyncio.run(
+                    invoke_mcp_client(action_text, approval_item.requester)
+                )
                 table.update_item(
                     Key={"request_id": request_id},
                     UpdateExpression="SET completion_status = :status, completion_message = :message",
@@ -209,14 +198,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    pprint(lambda_handler(
-        {
-            "body": (
-                '{'
+    pprint(
+        lambda_handler(
+            {
+                "body": (
+                    "{"
                     '"execution_timeout": 300,'
                     '"request_id": "cde914de3cebb4d18c35fb19231089921c3811766d8abd7b416f478627d92569"'
-                '}'
-            )
-        },
-        {},
-    ))
+                    "}"
+                )
+            },
+            {},
+        )
+    )

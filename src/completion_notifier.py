@@ -20,7 +20,8 @@ import os
 from collections.abc import Iterable
 from typing import Any
 
-import boto3
+import src.slack_blockkit as slack_blockkit
+from src.dynamodb_utils import get_approval_table
 
 
 def _extract_text_from_result(result_obj: Any) -> str:
@@ -85,7 +86,10 @@ def _build_blocks_from_text(
     - If text appears JSON-like, render each section inside ``` fences
     """
     blocks: list[dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Execution Result"}},
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Execution Result"},
+        },
     ]
     if request_id:
         blocks.append(
@@ -97,7 +101,9 @@ def _build_blocks_from_text(
             }
         )
 
-    is_probably_json = text.strip().startswith("{") or text.strip().startswith("[")
+    is_probably_json = text.strip().startswith("{") or text.strip().startswith(
+        "["
+    )
     # Allow for code-fence overhead per section
     chunk_budget = 2950 if is_probably_json else 3000
     for chunk in _chunk_text(text, chunk_budget):
@@ -105,7 +111,10 @@ def _build_blocks_from_text(
         if is_probably_json:
             section_text = f"```json\n{chunk}\n```"
         blocks.append(
-            {"type": "section", "text": {"type": "mrkdwn", "text": section_text}}
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": section_text},
+            }
         )
     return blocks
 
@@ -138,16 +147,7 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
         }
 
     # DynamoDB lookup for Slack metadata
-    region = os.environ.get("AWS_REGION") or "us-east-1"
-    table_name = os.environ.get("TABLE_NAME", "")
-    if not table_name:
-        return {
-            "statusCode": 200,
-            "body": {"ok": False, "skipped": "missing_table_name"},
-        }
-
-    dynamodb = boto3.resource("dynamodb", region_name=region)
-    table = dynamodb.Table(table_name)
+    table = get_approval_table()
     try:
         item = table.get_item(Key={"request_id": request_id}).get("Item") or {}
     except Exception:
@@ -181,12 +181,7 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     text = _extract_text_from_result(result_obj) or "Request completed."
     blocks = _build_blocks_from_text(text, request_id=request_id)
     print(f"blocks: {blocks}")
-    # Avoid circular import on module import; import at call time
-    from src.slack_lambda import _slack_api  # type: ignore
-
-    payload: dict[str, Any] = {"channel": channel_id, "ts": ts, "text": text}
-    if blocks:
-        payload["blocks"] = blocks
-    _slack_api("chat.update", bot_token, payload)
+    # Update message via Block Kit client
+    slack_blockkit.update_message(channel_id, ts, text=text, blocks=blocks)
 
     return {"statusCode": 200, "body": {"ok": True, "updated": True}}

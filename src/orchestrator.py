@@ -81,7 +81,8 @@ class AgentOrchestrator:
         - Build a ProposedAction from the request
         - Evaluate policy
         - If allow → call MCP directly
-        - If require_approval → start SFN and wait for approval status, then execute
+        - If require_approval → start SFN and wait for approval status,
+          then execute
         - If deny → return denied status
         """
 
@@ -123,7 +124,10 @@ class AgentOrchestrator:
         request_id = self._start_approval(proposed)
         self.memory.append(
             "system",
-            f"Approval requested for: {proposed.description} (id={request_id})",
+            (
+                "Approval requested for: "
+                f"{proposed.description} (id={request_id})"
+            ),
         )
 
         status = self._wait_for_approval(request_id)
@@ -154,7 +158,8 @@ class AgentOrchestrator:
         try:
             servers_env = os.getenv("MCP_SERVERS", "").strip()
             if servers_env:
-                # Auto-connect handled in process_query, but we connect explicitly to fail fast on misconfig
+                # Auto-connect handled in process_query, but we connect
+                # explicitly to fail fast on misconfig
                 alias_to_path = {}
                 for part in servers_env.split(";"):
                     if not part or "=" not in part:
@@ -162,12 +167,16 @@ class AgentOrchestrator:
                     alias, path = part.split("=", 1)
                     alias_to_path[alias.strip()] = path.strip()
                 if alias_to_path:
-                    await client.connect_to_servers(alias_to_path, request.user_id)
+                    await client.connect_to_servers(
+                        alias_to_path, request.user_id
+                    )
             else:
                 await client.connect_to_server(
                     "google_mcp/google_admin/mcp_server.py"
                 )
-            response_text = await client.process_query(full_query, request.user_id)
+            response_text = await client.process_query(
+                full_query, request.user_id
+            )
         finally:
             await client.cleanup()
 
@@ -179,7 +188,8 @@ class AgentOrchestrator:
         """Trigger Step Functions approval workflow; return request_id."""
 
         if not self._hitl_sfn_arn:
-            # Fallback: directly call approval_handler lambda input format locally
+            # Fallback: directly call approval_handler lambda input format
+            # locally
             item = ApprovalItem(
                 requester=proposed.user_id or "unknown",
                 approver="",
@@ -190,7 +200,8 @@ class AgentOrchestrator:
             )
             # Persist via table put through approval_handler path
             # We avoid direct table access here to preserve encapsulation.
-            # approval_handler._handle_new_approval_request expects event-like dict
+            # approval_handler._handle_new_approval_request expects
+            # event-like dict
             from .approval_handler import _handle_new_approval_request
 
             resp = _handle_new_approval_request(
@@ -204,17 +215,27 @@ class AgentOrchestrator:
                 }
             )
             try:
-                created_id = resp.get("body", {}).get("request_id")  # type: ignore[union-attr]
+                created_id = resp.get("body", {}).get(
+                    "request_id"
+                )  # type: ignore[union-attr]
                 print(
-                    f"Approval created: local_request_id={item.request_id} handler_request_id={created_id}"
+
+                        "Approval created: local_request_id="
+                        f"{item.request_id} handler_request_id={created_id}"
+
                 )
             except Exception:
                 created_id = None
-                # Best-effort diagnostic; do not change behavior if response format differs
+                # Best-effort diagnostic; do not change behavior if response
+                # format differs
                 print(
-                    f"Approval created: local_request_id={item.request_id} (handler response not loggable)"
+
+                        "Approval created: local_request_id="
+                        f"{item.request_id} (handler response not loggable)"
+
                 )
-            # Use handler-generated id when available so polling matches the stored record
+            # Use handler-generated id when available so polling matches the
+            # stored record
             return created_id or item.request_id
 
         input_payload: dict[str, Any] = {
@@ -231,12 +252,14 @@ class AgentOrchestrator:
             input=json.dumps(input_payload),
         )
 
-        # The approval lambda generates the request_id; we need to fetch it to poll status.
-        # In this simplified flow, we rely on the proposed content lookup not being feasible,
-        # so we re-query by latest item is not available. Instead, we return a synthetic id
-        # by storing locally when not using Step Functions. For SFN flow, real systems should
-        # return the id from the first task. Here we fall back to asking the status by other means.
-        # To avoid changing existing handlers, we generate a client-side id for tracking logs only.
+        # The approval lambda generates the request_id; we need to fetch it
+        # to poll status. In this simplified flow, we rely on the proposed
+        # content lookup not being feasible, so we re-query by latest item is
+        # not available. Instead, we return a synthetic id by storing locally
+        # when not using Step Functions. For SFN flow, real systems should
+        # return the id from the first task. Here we fall back to asking the
+        # status by other means. To avoid changing existing handlers, we
+        # generate a client-side id for tracking logs only.
         return "sfn-exec"
 
     def _wait_for_approval(
@@ -249,7 +272,11 @@ class AgentOrchestrator:
 
         deadline = time.time() + timeout_seconds
         print(
-            f"Starting approval polling: request_id={request_id} timeout_seconds={timeout_seconds} poll_interval={poll_interval}"
+
+                "Starting approval polling: "
+                f"request_id={request_id} timeout_seconds={timeout_seconds} "
+                f"poll_interval={poll_interval}"
+
         )
         while time.time() < deadline:
             item = get_approval_status(request_id)
@@ -258,11 +285,17 @@ class AgentOrchestrator:
                 ApprovalOutcome.DENY,
             }:
                 print(
-                    f"Approval item found: request_id={request_id} status={item.approval_status}"
+
+                        "Approval item found: "
+                        f"request_id={request_id} status={item.approval_status}"
+
                 )
                 return item.approval_status
             print(
-                f"Approval not yet decided for request_id={request_id}; sleeping {poll_interval}s"
+
+                    "Approval not yet decided for "
+                    f"request_id={request_id}; sleeping {poll_interval}s"
+
             )
             time.sleep(poll_interval)
         print(f"Approval polling timed out for request_id={request_id}")

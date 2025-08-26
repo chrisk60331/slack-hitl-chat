@@ -6,7 +6,6 @@ including file operations, search, and content management.
 
 import logging
 from typing import Any
-import os
 
 from fastapi import HTTPException
 from google.oauth2.credentials import Credentials

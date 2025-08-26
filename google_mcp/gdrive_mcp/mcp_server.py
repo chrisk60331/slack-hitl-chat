@@ -4,9 +4,9 @@ This module provides an MCP server for Google Drive operations including
 document search, creation, and management using FastMCP.
 """
 
+import logging
 import os
 import sys
-import logging
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import BearerAuthProvider
@@ -49,6 +49,7 @@ mcp = FastMCP(
 # Initialize service
 drive_service = GoogleDriveService(requester_email=sys.argv[1])
 logging.error(f"sys args: {sys.argv}")
+
 
 @mcp.tool(
     name="search_documents",

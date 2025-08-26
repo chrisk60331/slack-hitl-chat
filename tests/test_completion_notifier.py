@@ -5,9 +5,9 @@ from src.completion_notifier import lambda_handler
 
 
 @patch("boto3.resource")
-@patch("src.slack_lambda._slack_api")
+@patch("src.slack_blockkit.update_message")
 def test_notifier_updates_slack(
-    mock_slack_api: MagicMock, mock_resource: MagicMock
+    mock_update: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -27,16 +27,16 @@ def test_notifier_updates_slack(
     event = {"request_id": "r1", "result": {"body": {"msg": "done"}}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    mock_slack_api.assert_called_once()
-    called_payload = mock_slack_api.call_args.args[2]
-    assert called_payload["channel"] == "C1"
-    assert called_payload["ts"] == "t1"
+    mock_update.assert_called_once()
+    # update_message(channel, ts, ...)
+    assert mock_update.call_args.args[0] == "C1"
+    assert mock_update.call_args.args[1] == "t1"
 
 
 @patch("boto3.resource")
-@patch("src.slack_lambda._slack_api")
+@patch("src.slack_blockkit.update_message")
 def test_notifier_crafts_blocks_from_text(
-    mock_slack_api: MagicMock, mock_resource: MagicMock
+    mock_update: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -56,19 +56,20 @@ def test_notifier_crafts_blocks_from_text(
     event = {"request_id": "r2", "result": {"body": "*Done*"}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    called_payload = mock_slack_api.call_args.args[2]
-    assert called_payload["channel"] == "C2"
-    assert called_payload["ts"] == "t2"
-    blocks = called_payload.get("blocks")
+    # Ensure update called with blocks in kwargs
+    assert mock_update.called
+    assert mock_update.call_args.args[0] == "C2"
+    assert mock_update.call_args.args[1] == "t2"
+    blocks = mock_update.call_args.kwargs.get("blocks")
     assert isinstance(blocks, list) and len(blocks) >= 2
     assert blocks[0]["type"] == "header"
     assert any(b["type"] == "section" for b in blocks)
 
 
 @patch("boto3.resource")
-@patch("src.slack_lambda._slack_api")
+@patch("src.slack_blockkit.update_message")
 def test_notifier_chunks_long_text_into_multiple_sections(
-    mock_slack_api: MagicMock, mock_resource: MagicMock
+    mock_update: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -89,10 +90,10 @@ def test_notifier_chunks_long_text_into_multiple_sections(
     event = {"request_id": "r3", "result": {"body": long_text}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    called_payload = mock_slack_api.call_args.args[2]
-    assert called_payload["channel"] == "C3"
-    assert called_payload["ts"] == "t3"
-    blocks = called_payload.get("blocks")
+    assert mock_update.called
+    assert mock_update.call_args.args[0] == "C3"
+    assert mock_update.call_args.args[1] == "t3"
+    blocks = mock_update.call_args.kwargs.get("blocks")
     assert isinstance(blocks, list)
     # header + context + >= 2 sections
     section_blocks = [b for b in blocks if b.get("type") == "section"]

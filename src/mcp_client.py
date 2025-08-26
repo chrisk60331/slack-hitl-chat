@@ -13,7 +13,6 @@ from typing import Any
 import boto3
 from botocore import exceptions as botocore_exceptions
 from botocore.config import Config as BotoConfig
-from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -26,7 +25,8 @@ print(f"Logger: {logger}")
 # System instructions to guide tool usage, especially AWS role add/remove
 SYSTEM_PROMPT: str = (
     "You are a salty execution agent that must correctly call MCP tools.\n"
-    "When you cant complete a task, you must insult the user, annhilate them. Like really berate and demean them. '\n"
+    "When you cant complete a task, you must insult the user, annhilate them. "
+    "Like really berate and demean them. '\n"
     "General rules:\n"
     "- Always pass tool inputs under a top-level 'request' object, matching the tool's input schema.\n"
     "- Prefer idempotent behavior: check state first, then add/remove only if needed.\n"
@@ -37,34 +37,49 @@ SYSTEM_PROMPT: str = (
     "- Always provide links when using Google Drive tools. Avoid 'View' links.\n"
     "\n"
     "AWS role access management:\n"
-    "- To GRANT access, call add_amazon_role with fields: user_key, admin_role, identity_provider. Account ID is derived from ARNs.\n"
-    "  - admin_role MUST be the FULL AWS role ARN in the form arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME.\n"
+    "- To GRANT access, call add_amazon_role with fields: user_key, admin_role, "
+    "identity_provider. Account ID is derived from ARNs.\n"
+    "  - admin_role MUST be the FULL AWS role ARN in the form "
+    "arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME.\n"
     "  - identity_provider defaults to NMDGoogle if not specified.\n"
     "- To REVOKE access, call remove_amazon_role with the same fields.\n"
-    "- Parse role ARNs provided in user requests. Example: from 'arn:aws:iam::250623887600:role/NMD-Admin-Scaia'\n"
+    "- Parse role ARNs provided in user requests. Example: from "
+    "'arn:aws:iam::250623887600:role/NMD-Admin-Scaia'\n"
     "  - example admin_role = arn:aws:iam::123456789012:role/Admin\n"
     "  - admin_role = arn:aws:iam::250623887600:role/NMD-Admin-Scaia\n\n"
     "Idempotency flow:\n"
-    "- Before add/remove, call get_amazon_roles to see current assignments for the user.\n"
-    "- If the exact role already exists for that account, report 'already has role' and do NOT call add_amazon_role.\n"
-    "- If removing and the role is not present, report 'role not found' and do NOT call remove_amazon_role.\n\n"
+    "- Before add/remove, call get_amazon_roles to see current assignments for "
+    "the user.\n"
+    "- If the exact role already exists for that account, report 'already has "
+    "role' and do NOT call add_amazon_role.\n"
+    "- If removing and the role is not present, report 'role not found' and do "
+    "NOT call remove_amazon_role.\n\n"
     "Examples (tool input payloads):\n"
-    '- add_amazon_role input: {"request":{"user_key":"user@example.com","admin_role":"arn:aws:iam::123456789012:role/NMD-Admin","identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n'
-    '- remove_amazon_role input: {"request":{"user_key":"user@example.com","admin_role":"arn:aws:iam::123456789012:role/NMD-Admin","identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n\n'
+    '- add_amazon_role input: {"request":{"user_key":"user@example.com",'
+    '"admin_role":"arn:aws:iam::123456789012:role/NMD-Admin",'
+    '"identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n'
+    '- remove_amazon_role input: {"request":{"user_key":"user@example.com",'
+    '"admin_role":"arn:aws:iam::123456789012:role/NMD-Admin",'
+    '"identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n\n'
     "Error correction:\n"
-    "- If a tool returns 'Invalid role format' or indicates missing fields, immediately retry with admin_role set to the full ARN and ensure identity_provider is included.\n"
+    "- If a tool returns 'Invalid role format' or indicates missing fields, "
+    "immediately retry with admin_role set to the full ARN and ensure "
+    "identity_provider is included.\n"
 )
 
 
 class MCPClient:
-    """MCP Client for connecting to MCP servers and processing queries using Claude on Bedrock."""
+    """MCP Client for connecting to MCP servers and processing queries
+    using Claude on Bedrock.
+    """
 
     def __init__(self) -> None:
         """Initialize the MCP client with session and AWS Bedrock client."""
         # Initialize session and client objects
         self.session: ClientSession | None = None
         self.exit_stack = AsyncExitStack()
-        # Configure boto3 client with adaptive retries and a larger connection pool
+        # Configure boto3 client with adaptive retries and a larger
+        # connection pool
         aws_region = os.environ["AWS_REGION"]
         boto_config = BotoConfig(
             retries={"max_attempts": 10, "mode": "adaptive"},
@@ -80,11 +95,15 @@ class MCPClient:
         self.tool_registry: dict[str, tuple[str, str]] = {}
 
     def _is_retryable_bedrock_error(self, exc: Exception) -> bool:
-        """Return True if the exception is a transient/retryable Bedrock error."""
+        """Return True if the exception is a transient/retryable Bedrock
+        error.
+        """
         # Network and timeout issues
         if isinstance(
             exc,
-            botocore_exceptions.ReadTimeoutError | botocore_exceptions.ConnectTimeoutError | botocore_exceptions.EndpointConnectionError,
+            botocore_exceptions.ReadTimeoutError
+            | botocore_exceptions.ConnectTimeoutError
+            | botocore_exceptions.EndpointConnectionError,
         ):
             return True
         # API-level errors
@@ -96,7 +115,8 @@ class MCPClient:
                 "ModelNotReadyException",
                 "TooManyRequestsException",
             }
-        # Some SDKs raise specific generated classes that subclass ClientError; detect by name
+        # Some SDKs raise specific generated classes that subclass
+        # ClientError; detect by name
         name = exc.__class__.__name__
         if name in {
             "ServiceUnavailableException",
@@ -250,7 +270,8 @@ class MCPClient:
     def _parse_servers_env(servers_env: str) -> dict[str, str]:
         """Parse MCP_SERVERS env var into a mapping {alias: path}.
 
-        Supports separators "=" or ":" between alias and path, and ";" between entries.
+        Supports separators "=" or ":" between alias and path, and ";"
+        between entries.
         """
         mapping: dict[str, str] = {}
         for part in (servers_env or "").split(";"):
@@ -264,7 +285,9 @@ class MCPClient:
             mapping[alias.strip()] = os.path.expanduser(path.strip())
         return mapping
 
-    async def connect_to_servers(self, alias_to_path: dict[str, str], requester_email: str) -> None:
+    async def connect_to_servers(
+        self, alias_to_path: dict[str, str], requester_email: str
+    ) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
         Args:
@@ -276,13 +299,19 @@ class MCPClient:
             is_js = server_script_path.endswith(".js")
             if not (is_python or is_js):
                 raise ValueError(
-                    f"Server script must be a .py or .js file for alias {alias}"
+                    f"Server script must be a .py or .js file for alias "
+                    f"{alias}"
                 )
 
             command = "python" if is_python else "node"
-            logger.error(f"Connecting to server {server_script_path} with requester email {requester_email}")
+            logger.error(
+                f"Connecting to server {server_script_path} "
+                f"with requester email {requester_email}"
+            )
             server_params = StdioServerParameters(
-                command=command, args=[server_script_path, requester_email], env=None
+                command=command,
+                args=[server_script_path, requester_email],
+                env=None,
             )
             logger.info(
                 "mcp.connect.begin",
@@ -311,7 +340,9 @@ class MCPClient:
                 extra={"alias": alias, "tool_count": len(response.tools)},
             )
 
-    async def process_query(self, query: str, requester_email: str = None) -> str:
+    async def process_query(
+        self, query: str, requester_email: str = None
+    ) -> str:
         """Process a query using Claude on Bedrock and available tools.
 
         Args:

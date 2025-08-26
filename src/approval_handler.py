@@ -2,7 +2,7 @@
 AWS Lambda function for AgentCore Human-in-the-Loop approval processing.
 
 This function handles approval requests, logs them to DynamoDB, and sends
-notifications to Slack or Microsoft Teams.
+notifications to Slack (Block Kit) and optionally SNS.
 """
 
 import hashlib
@@ -14,15 +14,20 @@ from enum import Enum
 from typing import Any
 
 import boto3
-import requests
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
 
+from src.dynamodb_utils import get_approval_table
 from src.policy import (
     ApprovalOutcome,
     PolicyEngine,
     ProposedAction,
     infer_category_and_resource,
+)
+from src.slack_blockkit import (
+    build_approval_blocks,
+    post_message,
+    update_message,
 )
 
 
@@ -89,42 +94,19 @@ class ApprovalDecision(BaseModel):
     reason: str = ""
 
 
-if os.getenv("LOCAL_DEV", "false") == "true":
-    ddb_params = {
-        "endpoint_url": "http://agentcore-dynamodb-local:8000",
-        "aws_access_key_id": "test",
-        "aws_secret_access_key": "test",
-    }
-else:
-    ddb_params = {}
 # Initialize AWS clients
-dynamodb = boto3.resource(
-    "dynamodb", region_name=os.environ["AWS_REGION"], **ddb_params
-)
 sns = boto3.client("sns", region_name=os.environ["AWS_REGION"])
 # Configuration
 TABLE_NAME = os.environ["TABLE_NAME"]
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
-# Optional webhook integrations
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
-table = dynamodb.Table(TABLE_NAME)
+table = get_approval_table()
 
 
 # Helper to update Slack message thread
 def _slack_update(slack_channel: str, slack_ts: str, text: str) -> None:
     try:
         if slack_channel and slack_ts:
-            from src.slack_lambda import (
-                _slack_api,
-            )  # lazy import to avoid cycles
-
-            bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-            if bot_token:
-                _slack_api(
-                    "chat.update",
-                    bot_token,
-                    {"channel": slack_channel, "ts": slack_ts, "text": text},
-                )
+            update_message(slack_channel, slack_ts, text=text)
     except Exception as e:  # pragma: no cover - best effort
         print(f"Slack update failed: {e}")
 
@@ -543,35 +525,31 @@ def send_notifications(
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
     print(f"message_content {message_content}")
-    # Slack notifications
+    # Slack notifications (Block Kit only)
     try:
-        # Prefer Block Kit via bot token and channel when configured
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN")
         slack_channel_id = os.environ.get("SLACK_CHANNEL_ID")
-        if slack_bot_token and slack_channel_id:
-            from .slack_helper import post_slack_block_approval
-
-            if action == "pending":
-                if post_slack_block_approval(
-                    message_content,
-                    channel_id=slack_channel_id,
-                    bot_token=slack_bot_token,
-                ):
-                    notification_sent = True
-                    print(
-                        f"Slack Block Kit message sent for request {request_id}"
-                    )
-        # Fallback to webhook when configured
-        elif SLACK_WEBHOOK_URL:
-            from .slack_helper import post_slack_webhook_message
-
-            if post_slack_webhook_message(
-                message_content, function_url_getter=get_lambda_function_url
+        if slack_channel_id and action == "pending":
+            approve_value = json.dumps(
+                {"request_id": request_id, "action": ApprovalOutcome.ALLOW},
+                separators=(",", ":"),
+            )
+            reject_value = json.dumps(
+                {"request_id": request_id, "action": ApprovalOutcome.DENY},
+                separators=(",", ":"),
+            )
+            blocks = build_approval_blocks(
+                title=message_content["title"],
+                request_id=request_id,
+                requester=requester,
+                proposed_action=message_content["proposed_action"],
+                approve_value=approve_value,
+                reject_value=reject_value,
+            )
+            if post_message(
+                slack_channel_id, message_content["title"], blocks=blocks
             ):
                 notification_sent = True
-                print(
-                    f"Slack webhook notification sent for request {request_id}"
-                )
+                print(f"Slack Block Kit message sent for request {request_id}")
     except Exception as e:  # pragma: no cover - defensive
         print(f"Error sending Slack notification: {e}")
 
@@ -631,51 +609,7 @@ Note: Click the links above to approve or reject this request."""
     return base_message.strip()
 
 
-def send_slack_notification(content: dict[str, str]) -> bool:
-    """Post a simple Slack webhook message for approval notifications.
-
-    Kept for backward-compatibility with tests. Builds text inline and posts
-    via requests within this module to allow straightforward patching in tests.
-    """
-    webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-    if not webhook_url:
-        return False
-
-    # Build text in the same style as slack_helper._build_slack_text
-    lines = [
-        f"*{content.get('title', 'AgentCore Notification')}*",
-        f"*Request ID*: {content.get('request_id', '')}",
-        f"*Status*: {content.get('status', '')}",
-        f"*Requester*: {content.get('requester', '')}",
-        "",
-        "*Agent Prompt:*",
-        content.get("agent_prompt", ""),
-        "",
-        "*Proposed Action:*",
-        content.get("proposed_action", ""),
-    ]
-    reason = content.get("reason")
-    if reason:
-        lines.extend(["", "*Reason:*", reason])
-
-    if content.get("status") == "pending":
-        function_url = get_lambda_function_url()
-        if function_url:
-            rid = content.get("request_id", "")
-            approve_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.ALLOW}"
-            reject_link = f"{function_url}?request_id={rid}&action={ApprovalOutcome.DENY}"
-            lines.extend(
-                [
-                    "",
-                    "*Approval Actions:*",
-                    f"Approve: {approve_link}",
-                    f"Reject: {reject_link}",
-                ]
-            )
-
-    payload = {"text": "\n".join(lines)}
-    resp = requests.post(webhook_url, json=payload, timeout=5)
-    return resp.status_code == 200 and resp.text.strip().lower() in {"ok", ""}
+# Deprecated: Slack webhook notifications are removed in favor of Block Kit-only client
 
 
 def get_approval_status(request_id: str) -> ApprovalItem | None:
