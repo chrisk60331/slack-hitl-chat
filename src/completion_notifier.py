@@ -191,7 +191,7 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     text = _extract_text_from_result(result_obj) or "Request completed."
 
     blocks = _build_blocks_from_text(text, request_id=request_id)
-
+    print(f"blocks: {blocks}")
     # Update message via Block Kit client
     slack_blockkit.update_message(channel_id, ts, text=text, blocks=blocks)
 

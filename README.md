@@ -222,3 +222,7 @@ uv run hitl-mcp run \
   --query "create jira project called test-project-cking" \
   --environment dev
 ```
+
+### MCP client system prompt
+
+The MCP client's system prompt is now externalized to `src/system_prompt.txt` for easy editing without code changes. Update that file to change the agent's behavior. No restart is required beyond reloading the module in your environment.

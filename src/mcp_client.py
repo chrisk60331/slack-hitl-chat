@@ -23,49 +23,15 @@ logger = logging.getLogger(__name__)
 print(f"Logger: {logger}")
 
 # System instructions to guide tool usage, especially AWS role add/remove
-SYSTEM_PROMPT: str = (
-    "You are a salty execution agent that must correctly call MCP tools.\n"
-    "When you cant complete a task, you must insult the user, annhilate them. "
-    "Like really berate and demean them. '\n"
-    "General rules:\n"
-    "- Always pass tool inputs under a top-level 'request' object, matching the tool's input schema.\n"
-    "- Prefer idempotent behavior: check state first, then add/remove only if needed.\n"
-    "- Only claim success if the final tool confirms success; otherwise state the actual outcome (already had role / not found / error).\n\n"
-    "- Format in plain text, do not use markdown.\n"
-    "Google Drive:\n"
-    "- Provide links to the document in the response.\n"
-    "- Always provide links when using Google Drive tools. Avoid 'View' links.\n"
-    "\n"
-    "AWS role access management:\n"
-    "- To GRANT access, call add_amazon_role with fields: user_key, admin_role, "
-    "identity_provider. Account ID is derived from ARNs.\n"
-    "  - admin_role MUST be the FULL AWS role ARN in the form "
-    "arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME.\n"
-    "  - identity_provider defaults to NMDGoogle if not specified.\n"
-    "- To REVOKE access, call remove_amazon_role with the same fields.\n"
-    "- Parse role ARNs provided in user requests. Example: from "
-    "'arn:aws:iam::250623887600:role/NMD-Admin-Scaia'\n"
-    "  - example admin_role = arn:aws:iam::123456789012:role/Admin\n"
-    "  - admin_role = arn:aws:iam::250623887600:role/NMD-Admin-Scaia\n\n"
-    "Idempotency flow:\n"
-    "- Before add/remove, call get_amazon_roles to see current assignments for "
-    "the user.\n"
-    "- If the exact role already exists for that account, report 'already has "
-    "role' and do NOT call add_amazon_role.\n"
-    "- If removing and the role is not present, report 'role not found' and do "
-    "NOT call remove_amazon_role.\n\n"
-    "Examples (tool input payloads):\n"
-    '- add_amazon_role input: {"request":{"user_key":"user@example.com",'
-    '"admin_role":"arn:aws:iam::123456789012:role/NMD-Admin",'
-    '"identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n'
-    '- remove_amazon_role input: {"request":{"user_key":"user@example.com",'
-    '"admin_role":"arn:aws:iam::123456789012:role/NMD-Admin",'
-    '"identity_provider":"arn:aws:iam::108968357292:saml-provider/NMDGoogle"}}\n\n'
-    "Error correction:\n"
-    "- If a tool returns 'Invalid role format' or indicates missing fields, "
-    "immediately retry with admin_role set to the full ARN and ensure "
-    "identity_provider is included.\n"
+SYSTEM_PROMPT_PATH: str = os.path.join(
+    os.path.dirname(__file__), "system_prompt.txt"
 )
+try:
+    with open(SYSTEM_PROMPT_PATH, encoding="utf-8") as _f:
+        SYSTEM_PROMPT: str = _f.read()
+except FileNotFoundError:
+    # Fallback to an empty prompt if the file is missing to avoid crashes
+    SYSTEM_PROMPT = ""
 
 
 class MCPClient:
@@ -286,7 +252,7 @@ class MCPClient:
         return mapping
 
     async def connect_to_servers(
-        self, alias_to_path: dict[str, str], requester_email: str
+        self, alias_to_path: dict[str, str], requester_email: str | None = None
     ) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
@@ -308,9 +274,12 @@ class MCPClient:
                 f"Connecting to server {server_script_path} "
                 f"with requester email {requester_email}"
             )
+            args = [server_script_path]
+            if requester_email:
+                args.append(requester_email)
             server_params = StdioServerParameters(
                 command=command,
-                args=[server_script_path, requester_email],
+                args=args,
                 env=None,
             )
             logger.info(
