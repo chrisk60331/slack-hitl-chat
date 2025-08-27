@@ -99,7 +99,6 @@ sns = boto3.client("sns", region_name=os.environ["AWS_REGION"])
 # Configuration
 TABLE_NAME = os.environ["TABLE_NAME"]
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
-table = get_approval_table()
 
 
 # Helper to update Slack message thread
@@ -288,7 +287,9 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     decision = ApprovalDecision(**decision_data)
 
     # Get existing approval item
-    response = table.get_item(Key={"request_id": decision.request_id})
+    response = get_approval_table().get_item(
+        Key={"request_id": decision.request_id}
+    )
     item_data = response.get("Item")
     if not item_data:
         raise ValueError(
@@ -307,7 +308,7 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     approval_item.timestamp = datetime.now(UTC).isoformat()
 
     # Save updated item to DynamoDB
-    table.put_item(Item=approval_item.to_dynamodb_item())
+    get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
 
     # Send notification about the decision
     send_notifications(
@@ -366,7 +367,7 @@ def _extract_decision_data(event: dict[str, Any]) -> dict[str, Any]:
 def _handle_status_check(event: dict[str, Any]) -> dict[str, Any]:
     """Handle existing status check requests."""
     request_id = _extract_request_id_for_status_check(event)
-    response = table.get_item(Key={"request_id": request_id})
+    response = get_approval_table().get_item(Key={"request_id": request_id})
     item_data = response.get("Item")
     if not item_data:
         raise ValueError(f"Approval request {request_id} not found")
@@ -445,7 +446,7 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     )
 
     # Upsert record for audit/completion
-    table.put_item(Item=approval_item.to_dynamodb_item())
+    get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
     _slack_update(
         slack_channel,
         slack_ts,
@@ -623,7 +624,9 @@ def get_approval_status(request_id: str) -> ApprovalItem | None:
         ApprovalItem or None if not found
     """
     try:
-        response = table.get_item(Key={"request_id": request_id})
+        response = get_approval_table().get_item(
+            Key={"request_id": request_id}
+        )
         item_data = response.get("Item")
         print(f"Approval item data: {item_data}")
         if item_data:

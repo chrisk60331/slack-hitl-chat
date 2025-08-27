@@ -40,7 +40,6 @@ from .slack_session_store import SlackSessionStore
 
 # In-memory best-effort dedupe for local/dev. In AWS, prefer DynamoDB.
 _SEEN_EVENT_IDS: set[str] = set()
-table = get_approval_table()
 
 
 def _should_process_event(event_id: str, *, ttl_seconds: int = 60 * 5) -> bool:
@@ -277,10 +276,13 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = compute_request_id_from_action(action_text)
     requester_email = slack_userid_to_email(
         user, os.environ.get("SLACK_BOT_TOKEN", "")
-    )
+    ) or ""
     print(f"requester_email: {requester_email}")
 
-    if table.get_item(Key={"request_id": request_id}).get("Item"):
+    # Lazy init approval table to avoid import-time AWS connections (eases tests)
+    approval_table = get_approval_table()
+    found = approval_table.get_item(Key={"request_id": request_id}).get("Item")
+    if found and found.get("request_id") == request_id:
         print(
             f"request_id {compute_request_id_from_action(action_text)} found in table"
         )
@@ -355,13 +357,13 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     else:
         session_id = f"session-{channel_id}-{thread_ts}"
 
-    # Post initial placeholder (avoid including thread_ts when not present)
+    # Post initial placeholder as a threaded reply to the user's message
+    # Always thread to the parent message timestamp (thread_ts or original ts)
     initial_payload: dict[str, Any] = {
         "channel": channel_id,
         "text": "Received your message — preparing a response…",
+        "thread_ts": thread_ts,
     }
-    if event_obj.get("thread_ts"):
-        initial_payload["thread_ts"] = thread_ts
     try:
         print(
             {
@@ -374,9 +376,8 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         pass
     # Always post initial message once
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
-    ts = initial.get("ts") or (
-        thread_ts if event_obj.get("thread_ts") else None
-    )
+    # Use the ts of the newly posted message; fall back to parent thread_ts
+    ts = initial.get("ts") or thread_ts
 
     try:
         boto3.client(

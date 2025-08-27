@@ -6,8 +6,8 @@ import pytest
 
 from gif_mcp.models import (
     GetRandomGifRequest,
-    GifSource,
     GifResult,
+    GifSource,
     SearchGifsRequest,
 )
 from gif_mcp.service import GifService

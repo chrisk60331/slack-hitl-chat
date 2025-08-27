@@ -66,7 +66,9 @@ uv run ruff check
 uv run ruff format
 ```
 
-### Slack Block Kit in Completion Notifications
+### Slack threaded replies and Block Kit
+
+Slack interactions now always reply in a thread anchored to the user's original message. The initial bot reply includes `thread_ts` so all subsequent updates and messages remain scoped to that thread for clear request↔response mapping.
 
 When an approved action completes, the completion notifier updates the original Slack message. If the execution result contains a `blocks` array (Slack Block Kit), those blocks will be used. Otherwise, a simple mrkdwn section block is synthesized from the result text so updates always use Block Kit.
 

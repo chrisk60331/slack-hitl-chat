@@ -1,6 +1,7 @@
 """Data models for GIF MCP Server."""
 
 from enum import Enum
+
 from pydantic import BaseModel, Field
 
 

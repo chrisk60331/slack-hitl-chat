@@ -14,7 +14,6 @@ from typing import Any
 import requests
 
 
-
 def _slack_api(
     method: str, token: str, payload: dict[str, Any], *, timeout: int = 10
 ) -> dict[str, Any]:

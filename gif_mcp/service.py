@@ -3,18 +3,18 @@
 import os
 import random
 
+import dotenv
 import requests
 
 from .models import (
     GetRandomGifRequest,
     GetTrendingGifsRequest,
-    GifSource,
     GifResult,
+    GifSource,
     SearchGifsRequest,
     SearchGifsResponse,
     SlackGifMessage,
 )
-import dotenv
 
 dotenv.load_dotenv()
 
