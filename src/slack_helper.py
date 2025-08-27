@@ -126,6 +126,9 @@ __all__ = [
     "verify_slack_request",
     "parse_action_from_interaction",
     "respond_via_response_url",
+    "get_bot_user_id",
+    "fetch_thread_messages",
+    "build_thread_context",
 ]
 
 
@@ -330,3 +333,151 @@ def respond_via_response_url(
     payload = {"replace_original": True, "text": text}
     resp = requests.post(response_url, json=payload, timeout=timeout_seconds)
     return 200 <= resp.status_code < 300
+
+
+def get_bot_user_id(token: str, *, timeout_seconds: int = 5) -> str | None:
+    """Return the Slack bot user_id for the provided bot token.
+
+    Args:
+        token: Slack bot token (xoxb-...)
+        timeout_seconds: HTTP timeout for Slack API call
+
+    Returns:
+        Slack user id (e.g., "U012345") or None on failure.
+    """
+    if not token:
+        return None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    try:
+        resp = requests.post(
+            "https://slack.com/api/auth.test", headers=headers, timeout=timeout_seconds
+        )
+        data = resp.json()
+        if data.get("ok"):
+            # For bot tokens, user_id corresponds to the bot user id
+            return str(data.get("user_id") or data.get("user"))
+    except Exception:
+        pass
+    return None
+
+
+def fetch_thread_messages(
+    channel_id: str,
+    thread_ts: str,
+    *,
+    token: str,
+    max_messages: int = 50,
+    timeout_seconds: int = 10,
+) -> list[dict[str, Any]]:
+    """Fetch Slack thread messages (root and replies) via conversations.replies.
+
+    Args:
+        channel_id: Slack channel ID
+        thread_ts: Root thread timestamp to anchor replies
+        token: Slack bot token
+        max_messages: Maximum number of messages to fetch across pagination
+        timeout_seconds: HTTP timeout per request
+
+    Returns:
+        List of Slack message dicts in chronological order.
+    """
+    if not (channel_id and thread_ts and token):
+        return []
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    params: dict[str, str] = {"channel": channel_id, "ts": thread_ts, "limit": "200"}
+
+    messages: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    while True:
+        data = params.copy()
+        if cursor:
+            data["cursor"] = cursor
+        try:
+            resp = requests.post(
+                "https://slack.com/api/conversations.replies",
+                data=data,
+                headers=headers,
+                timeout=timeout_seconds,
+            )
+            payload = resp.json()
+        except Exception:
+            break
+        if not payload.get("ok"):
+            break
+        batch = payload.get("messages") or []
+        for m in batch:
+            messages.append(m)
+            if len(messages) >= max_messages:
+                return messages
+        cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    return messages
+
+
+def build_thread_context(
+    messages: list[dict[str, Any]],
+    *,
+    bot_user_id: str | None,
+    max_turns: int = 8,
+    max_chars: int = 3000,
+) -> str:
+    """Construct a compact chat transcript from Slack thread messages.
+
+    Heuristics:
+    - Identify assistant turns by matching user == bot_user_id or presence of bot_id
+    - Keep only the last `max_turns` turns (user+assistant counts individually)
+    - Truncate to `max_chars` total characters
+
+    Args:
+        messages: Slack thread messages in chronological order
+        bot_user_id: Slack user id of the bot (if known)
+        max_turns: Maximum number of lines (turns) to include
+        max_chars: Maximum characters across the entire transcript
+
+    Returns:
+        A plain-text transcript suitable to prepend to model prompts.
+    """
+    from collections import deque
+
+    def _role_of(msg: dict[str, Any]) -> str:
+        user_id = str(msg.get("user") or "")
+        if (bot_user_id and user_id == bot_user_id) or msg.get("bot_id"):
+            return "assistant"
+        return "user"
+
+    # Map Slack messages to simple (role, text)
+    turns: list[str] = []
+    for m in messages:
+        text = str(m.get("text") or "").strip()
+        if not text:
+            continue
+        role = _role_of(m)
+        # Strip Slack mentions noise like <@U...>
+        try:
+            import re
+
+            text = re.sub(r"<@[^>]+>\\s*", "", text).strip()
+        except Exception:
+            pass
+        turns.append(f"{role}: {text}")
+
+    # Keep only the last max_turns
+    limited = deque(maxlen=max_turns)
+    for t in turns:
+        limited.append(t)
+
+    transcript = "\n".join(limited)
+    if len(transcript) > max_chars:
+        # Hard truncate while keeping last lines
+        transcript = transcript[-max_chars:]
+    return transcript

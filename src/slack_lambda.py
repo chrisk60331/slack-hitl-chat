@@ -34,6 +34,11 @@ from src.approval_handler import (
 from src.dynamodb_utils import get_approval_table
 from src.mcp_client import MCPClient
 from src.slack_blockkit import update_message
+from src.slack_helper import (
+    build_thread_context,
+    fetch_thread_messages,
+    get_bot_user_id,
+)
 
 from .secrets_manager import get_secret_json
 from .slack_session_store import SlackSessionStore
@@ -374,6 +379,22 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
     except Exception:
         pass
+    # Build Slack thread context (fetch last messages and format a compact transcript)
+    try:
+        bot_user_id = get_bot_user_id(bot_token)
+        thread_messages = fetch_thread_messages(
+            channel_id, thread_ts, token=bot_token, max_messages=50
+        )
+        thread_context = build_thread_context(
+            thread_messages, bot_user_id=bot_user_id, max_turns=12, max_chars=4000
+        )
+    except Exception:
+        thread_context = ""
+
+    # Prepend thread context to the action text for downstream processing
+    if thread_context:
+        action_text = f"[Slack thread context]\n{thread_context}\n\nUser: {action_text}".strip()
+
     # Always post initial message once
     initial = _slack_api("chat.postMessage", bot_token, initial_payload)
     # Use the ts of the newly posted message; fall back to parent thread_ts
@@ -392,6 +413,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "slack_ts": ts,
                     "request_id": request_id,
                     "requester": requester_email,
+                    "thread_context": thread_context,
                 }
             ),
         )

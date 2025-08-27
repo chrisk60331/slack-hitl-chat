@@ -106,7 +106,14 @@ def test_events_handler_posts_initial_message(
         ),
     }
 
-    resp = events_handler(event, None)
+    # Also patch Slack thread context helpers to avoid external calls
+    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
+        "src.slack_lambda.fetch_thread_messages", return_value=[
+            {"user": "U1", "text": "hi"},
+            {"user": "U_BOT", "text": "hello"},
+        ]
+    ), patch("src.slack_lambda.build_thread_context", return_value="user: hi\nassistant: hello"):
+        resp = events_handler(event, None)
     assert resp["statusCode"] == 200
 
     # Ensure initial postMessage was called at least once
@@ -164,7 +171,12 @@ def test_events_handler_dedup_on_retry(
 
     # First delivery
     event1 = {"headers": {}, "body": json.dumps(base_body)}
-    resp1 = events_handler(event1, None)
+    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
+        "src.slack_lambda.fetch_thread_messages", return_value=[
+            {"user": "U1", "text": "hello"}
+        ]
+    ), patch("src.slack_lambda.build_thread_context", return_value="user: hello"):
+        resp1 = events_handler(event1, None)
     assert resp1["statusCode"] == 200
 
     # Retry delivery with retry headers should dedupe
@@ -175,7 +187,12 @@ def test_events_handler_dedup_on_retry(
         },
         "body": json.dumps(base_body),
     }
-    resp2 = events_handler(event2, None)
+    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
+        "src.slack_lambda.fetch_thread_messages", return_value=[
+            {"user": "U1", "text": "hello"}
+        ]
+    ), patch("src.slack_lambda.build_thread_context", return_value="user: hello"):
+        resp2 = events_handler(event2, None)
     assert resp2["statusCode"] == 200
 
     # Ensure chat.postMessage was not called twice for retry
@@ -235,7 +252,13 @@ def test_app_mention_posts_initial_message(
         ),
     }
 
-    resp = events_handler(event, None)
+    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
+        "src.slack_lambda.fetch_thread_messages", return_value=[
+            {"user": "U1", "text": "help"},
+            {"user": "U_BOT", "text": "ok"},
+        ]
+    ), patch("src.slack_lambda.build_thread_context", return_value="user: help\nassistant: ok"):
+        resp = events_handler(event, None)
     assert resp["statusCode"] == 200
     called_urls = [
         call.args[0] for call in mock_requests_post.mock_calls if call.args
