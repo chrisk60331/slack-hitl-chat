@@ -124,7 +124,7 @@ def _build_blocks_from_text(
                         "type": "mrkdwn",
                         "text": line
                 }})
-    print(f"blocks: {blocks}")
+
     return  blocks
 
 
@@ -189,9 +189,9 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
 
     # Build text and blocks from raw/markdown
     text = _extract_text_from_result(result_obj) or "Request completed."
-    print(f"text: {text}")
+
     blocks = _build_blocks_from_text(text, request_id=request_id)
-    print(f"blocks: {blocks}")
+
     # Update message via Block Kit client
     slack_blockkit.update_message(channel_id, ts, text=text, blocks=blocks)
 
