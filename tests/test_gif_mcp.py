@@ -6,6 +6,7 @@ import pytest
 
 from gif_mcp.models import (
     GetRandomGifRequest,
+    GifSource,
     GifResult,
     SearchGifsRequest,
 )
@@ -181,8 +182,8 @@ class TestGifService:
         assert service.default_source == "tenor"
 
     def test_service_without_keys(self, service):
-        """Test GifService without API keys."""
-        assert service.default_source == "mock"
+        """Service default source indicates unconfigured when no keys."""
+        assert service.default_source == "unconfigured"
 
     @patch("requests.get")
     def test_search_giphy_success(
@@ -206,18 +207,15 @@ class TestGifService:
         assert result.total_count == 2
 
     @patch("requests.get")
-    def test_search_giphy_error_fallback(self, mock_get, service):
-        """Test Giphy search error fallback to mock."""
+    def test_search_giphy_error_raises(self, mock_get, service):
+        """Giphy search error propagates."""
         mock_get.side_effect = Exception("API Error")
 
-        # Set Giphy API key
         service.giphy_api_key = "test_key"
 
         request = SearchGifsRequest(query="test")
-        result = service.search_gifs(request)
-
-        assert len(result.gifs) == 2
-        assert result.gifs[0].source == "mock"
+        with pytest.raises(Exception):
+            service.search_gifs(request)
 
     @patch("requests.get")
     def test_search_tenor_success(
@@ -240,14 +238,47 @@ class TestGifService:
         assert result.gifs[0].source == "tenor"
         assert result.gifs[0].id == "tenor_1"
 
-    def test_search_mock_fallback(self, service):
-        """Test mock search fallback."""
+    def test_search_without_keys_raises(self, service):
+        """No providers configured raises error."""
+        service.giphy_api_key = None
+        service.tenor_api_key = None
         request = SearchGifsRequest(query="test query")
+        with pytest.raises(ValueError):
+            service.search_gifs(request)
+    @patch("requests.get")
+    def test_force_tenor_without_key_raises(self, mock_get, service):
+        """Explicit tenor source without key raises."""
+        service.tenor_api_key = None
+        service.giphy_api_key = None
+
+        request = SearchGifsRequest(query="test", source=GifSource.tenor)
+        with pytest.raises(ValueError):
+            service.search_gifs(request)
+
+    @patch("requests.get")
+    def test_force_giphy_with_key(self, mock_get, service, mock_giphy_response):
+        """Explicit giphy source uses giphy when key present."""
+        mock_response = Mock()
+        mock_response.json.return_value = mock_giphy_response
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        service.giphy_api_key = "test_key"
+        service.tenor_api_key = None
+
+        request = SearchGifsRequest(query="test", source=GifSource.giphy)
         result = service.search_gifs(request)
 
         assert len(result.gifs) == 2
-        assert result.gifs[0].source == "mock"
-        assert "test query" in result.gifs[0].title
+        assert result.gifs[0].source == "giphy"
+
+    @patch("requests.get")
+    def test_force_mock_source_removed(self, mock_get, service):
+        """Mock provider removed; using it should fail type or resolution."""
+        service.giphy_api_key = "test_key"
+        with pytest.raises(ValueError):
+            # Bypass type system by casting; service should still raise
+            service._resolve_provider("mock")
 
     @patch("requests.get")
     def test_get_random_giphy_success(self, mock_get, service):
@@ -282,13 +313,12 @@ class TestGifService:
         assert result.source == "giphy"
         assert result.id == "random_giphy"
 
-    def test_get_random_mock_fallback(self, service):
-        """Test random mock GIF fallback."""
-        request = GetRandomGifRequest(tag="test tag")
-        result = service.get_random_gif(request)
-
-        assert result.source == "mock"
-        assert "test tag" in result.title
+    def test_get_random_without_keys_raises(self, service):
+        """Random without providers raises error."""
+        service.giphy_api_key = None
+        service.tenor_api_key = None
+        with pytest.raises(ValueError):
+            service.get_random_gif(GetRandomGifRequest(tag="x"))
 
     def test_format_for_slack(self, service):
         """Test Slack formatting."""
@@ -332,9 +362,35 @@ class TestGifService:
 class TestIntegration:
     """Integration tests for the GIF MCP system."""
 
-    def test_end_to_end_search_and_format(self):
-        """Test end-to-end search and Slack formatting."""
+    @patch("requests.get")
+    def test_end_to_end_search_and_format(self, mock_get):
+        """Test end-to-end search and Slack formatting (with mocked provider)."""
+        # Configure fake Giphy key and response
         service = GifService()
+        service.giphy_api_key = "test_key"
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "giphy_1",
+                    "title": "Giphy Test GIF 1",
+                    "images": {
+                        "original": {
+                            "url": "https://media.giphy.com/media/test1.gif",
+                            "width": "480",
+                            "height": "270",
+                            "size": "1024000",
+                        },
+                        "preview_gif": {
+                            "url": "https://media.giphy.com/media/test1_preview.gif"
+                        },
+                    },
+                }
+            ],
+            "pagination": {"total_count": 1, "count": 1, "offset": 0},
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
 
         # Search for GIFs
         search_request = SearchGifsRequest(query="test", limit=1)
@@ -350,21 +406,13 @@ class TestIntegration:
         assert slack_message.gif_url == gif.url
         assert slack_message.blocks is not None
 
-    def test_mock_data_consistency(self):
-        """Test that mock data is consistent across calls."""
+    def test_provider_required_when_no_keys(self):
+        """Without keys, operations must fail clearly."""
         service = GifService()
-
-        # First call
-        request1 = SearchGifsRequest(query="test1")
-        result1 = service.search_gifs(request1)
-
-        # Second call with same query
-        request2 = SearchGifsRequest(query="test1")
-        result2 = service.search_gifs(request2)
-
-        # Mock data should be consistent
-        assert len(result1.gifs) == len(result2.gifs)
-        assert result1.gifs[0].title == result2.gifs[0].title
+        service.giphy_api_key = None
+        service.tenor_api_key = None
+        with pytest.raises(ValueError):
+            service.search_gifs(SearchGifsRequest(query="x"))
 
 
 if __name__ == "__main__":

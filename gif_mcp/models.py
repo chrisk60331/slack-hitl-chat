@@ -1,6 +1,22 @@
 """Data models for GIF MCP Server."""
 
+from enum import Enum
 from pydantic import BaseModel, Field
+
+
+class GifSource(str, Enum):
+    """Supported GIF providers.
+
+    Values correspond to provider identifiers used throughout the service.
+    """
+
+    giphy = "giphy"
+    tenor = "tenor"
+
+    @property
+    def is_real_provider(self) -> bool:
+        """Whether this provider fetches real GIFs from an external API."""
+        return self in {GifSource.giphy, GifSource.tenor}
 
 
 class SearchGifsRequest(BaseModel):
@@ -18,6 +34,10 @@ class SearchGifsRequest(BaseModel):
     )
     offset: int = Field(
         default=0, ge=0, description="Number of results to skip for pagination"
+    )
+    source: GifSource | None = Field(
+        default=None,
+        description="Preferred GIF provider to use ('giphy' or 'tenor').",
     )
 
 
@@ -52,6 +72,10 @@ class GetRandomGifRequest(BaseModel):
 
     tag: str | None = Field(None, description="Tag to filter random GIF by")
     rating: str | None = Field(default="g", description="Content rating")
+    source: GifSource | None = Field(
+        default=None,
+        description="Preferred GIF provider to use ('giphy' or 'tenor').",
+    )
 
 
 class GetTrendingGifsRequest(BaseModel):
@@ -67,6 +91,10 @@ class GetTrendingGifsRequest(BaseModel):
     time_period: str | None = Field(
         default="day",
         description="Time period for trending (day, week, month)",
+    )
+    source: GifSource | None = Field(
+        default=None,
+        description="Preferred GIF provider to use ('giphy' or 'tenor').",
     )
 
 

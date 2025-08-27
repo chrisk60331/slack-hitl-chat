@@ -41,6 +41,11 @@
                   "default": 0,
                   "minimum": 0,
                   "description": "Number of results to skip for pagination"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["giphy", "tenor"],
+                  "description": "Preferred GIF provider"
                 }
               },
               "required": ["query"]
@@ -60,6 +65,11 @@
                   "default": "g",
                   "enum": ["g", "pg", "pg-13", "r"],
                   "description": "Content rating filter"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["giphy", "tenor"],
+                  "description": "Preferred GIF provider"
                 }
               }
             }
@@ -87,51 +97,13 @@
                   "default": "day",
                   "enum": ["day", "week", "month"],
                   "description": "Time period for trending"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["giphy", "tenor"],
+                  "description": "Preferred GIF provider"
                 }
               }
-            }
-          },
-          "format_gif_for_slack": {
-            "description": "Format a GIF result for Slack display with rich blocks",
-            "inputSchema": {
-              "type": "object",
-              "properties": {
-                "gif_data": {
-                  "type": "object",
-                  "description": "GIF result data from search or random endpoints"
-                },
-                "message": {
-                  "type": "string",
-                  "default": "",
-                  "description": "Custom text message to accompany the GIF"
-                }
-              },
-              "required": ["gif_data"]
-            }
-          },
-          "search_and_format_for_slack": {
-            "description": "Search for GIFs and format them for Slack in one operation",
-            "inputSchema": {
-              "type": "object",
-              "properties": {
-                "query": {
-                  "type": "string",
-                  "description": "Search query for GIFs"
-                },
-                "message": {
-                  "type": "string",
-                  "default": "",
-                  "description": "Custom text message to accompany the GIF"
-                },
-                "limit": {
-                  "type": "integer",
-                  "default": 5,
-                  "minimum": 1,
-                  "maximum": 10,
-                  "description": "Maximum number of GIFs to search"
-                }
-              },
-              "required": ["query"]
             }
           },
           "get_random_gif_for_slack": {
@@ -154,6 +126,11 @@
                   "default": "g",
                   "enum": ["g", "pg", "pg-13", "r"],
                   "description": "Content rating filter"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["giphy", "tenor"],
+                  "description": "Preferred GIF provider"
                 }
               }
             }

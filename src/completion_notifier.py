@@ -85,38 +85,48 @@ def _build_blocks_from_text(
     - One or more section blocks with mrkdwn text (chunked)
     - If text appears JSON-like, render each section inside ``` fences
     """
-    blocks: list[dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "Execution Result"},
-        },
-    ]
-    if request_id:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": f"*Request ID:* {request_id}"}
-                ],
-            }
-        )
+    # First, try to parse text as JSON payload from an MCP tool
+    try:
+        obj = json.loads(text)
+    except Exception:
+        obj = None
 
-    is_probably_json = text.strip().startswith("{") or text.strip().startswith(
-        "["
-    )
-    # Allow for code-fence overhead per section
-    chunk_budget = 2950 if is_probably_json else 3000
-    for chunk in _chunk_text(text, chunk_budget):
-        section_text = chunk
-        if is_probably_json:
-            section_text = f"```json\n{chunk}\n```"
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": section_text},
-            }
-        )
-    return blocks
+    # If it's a GIF payload or contains explicit blocks, construct the exact
+    # structure requested: header, context, a section with text, then image.
+    blocks = [{
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": "Execution Result"
+        }},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Request ID:* {request_id}"
+                }
+            ]
+        }
+    ]
+    for line in text.split("\n"):
+        if line.startswith("https://"):
+            blocks.append({
+                "type": "image",
+                "image_url": line,
+                "alt_text": "GIF"
+            })
+        else:
+            if line.strip():
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": line
+                }})
+    print(f"blocks: {blocks}")
+    return  blocks
+
 
 
 def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
@@ -179,9 +189,27 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
 
     # Build text and blocks from raw/markdown
     text = _extract_text_from_result(result_obj) or "Request completed."
+    print(f"text: {text}")
     blocks = _build_blocks_from_text(text, request_id=request_id)
     print(f"blocks: {blocks}")
     # Update message via Block Kit client
     slack_blockkit.update_message(channel_id, ts, text=text, blocks=blocks)
 
     return {"statusCode": 200, "body": {"ok": True, "updated": True}}
+
+
+if __name__ == "__main__":
+    event = {
+        "message": "Request has been approved",
+        "status": "approved",
+        "request_id": "f2ddaf399e521a7778a6662b2060dc227d8cb701e90062eda0fe50715b141c41",
+        "execute_result": {
+            "statusCode": 200,
+            "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+            },
+            "body": "Here's a cute cat GIF for you.\n\nEnjoy this adorable feline friend!\n\nhttps://media.tenor.com/0Q5IZ6e9pC8AAAAC/cat-cute-cat.gif\n\n"
+        }
+    }
+    lambda_handler(event, {})

@@ -14,6 +14,7 @@ from typing import Any
 import requests
 
 
+
 def _slack_api(
     method: str, token: str, payload: dict[str, Any], *, timeout: int = 10
 ) -> dict[str, Any]:
@@ -51,6 +52,12 @@ def post_message_with_response(
     bot_token = token or os.environ.get("SLACK_BOT_TOKEN", "")
     if not bot_token:
         return {"ok": False, "error": "missing_token"}
+    # If blocks not provided, attempt to parse text as JSON (e.g., MCP tool output)
+    if blocks is None:
+        parsed_text, parsed_blocks = _extract_blocks_from_text_payload(text)
+        if parsed_blocks:
+            text = parsed_text
+            blocks = parsed_blocks
     payload: dict[str, Any] = {"channel": channel, "text": text}
     if blocks:
         payload["blocks"] = blocks
@@ -86,6 +93,12 @@ def update_message(
     bot_token = token or os.environ.get("SLACK_BOT_TOKEN", "")
     if not bot_token:
         return False
+    # Auto-extract blocks from JSON text payloads if not provided
+    if blocks is None and text is not None:
+        new_text, parsed_blocks = _extract_blocks_from_text_payload(text)
+        if parsed_blocks:
+            text = new_text
+            blocks = parsed_blocks
     payload: dict[str, Any] = {"channel": channel, "ts": ts}
     if text is not None:
         payload["text"] = text
@@ -153,6 +166,10 @@ def build_blocks_from_text(
     context_kv: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Create blocks from plain or markdown text with optional header/context."""
+    # If text is a JSON string containing a 'blocks' or 'gif_url', prefer rich blocks
+    parsed_text, parsed_blocks = _extract_blocks_from_text_payload(text)
+    if parsed_blocks:
+        return parsed_blocks
     blocks: list[dict[str, Any]] = []
     if header:
         blocks.append(
@@ -172,6 +189,53 @@ def build_blocks_from_text(
         {"type": "section", "text": {"type": "mrkdwn", "text": text}}
     )
     return blocks
+
+
+def _extract_blocks_from_text_payload(
+    text: str,
+) -> tuple[str, list[dict[str, Any]] | None]:
+    """Extract Slack blocks from a JSON string payload when possible.
+
+    Accepts text that may be a JSON-serialized object from MCP tools, e.g.
+    '{"text":"...","gif_url":"https://...","blocks":[...]}'. If
+    'blocks' exist, they are returned. If no 'blocks' but a 'gif_url' exists,
+    constructs a simple section + image block set.
+
+    Returns:
+        (text, blocks_or_none): the message text to use and any blocks found.
+    """
+    try:
+        obj = json.loads(text)
+        if not isinstance(obj, dict):
+            return text, None
+    except Exception:
+        return text, None
+
+    # Prefer explicit blocks when present
+    blocks = obj.get("blocks")
+    if isinstance(blocks, list) and blocks:
+        # Use provided text if available
+        new_text = str(obj.get("text") or text)
+        return new_text, blocks  # type: ignore[return-value]
+
+    # Otherwise build blocks if a gif_url is present
+    gif_url = obj.get("gif_url") or obj.get("image_url")
+    if isinstance(gif_url, str) and gif_url:
+        new_text = str(obj.get("text") or text)
+        alt = str(obj.get("gif_title") or obj.get("alt_text") or "")
+        title_text = str(obj.get("gif_title") or "")
+        built_blocks: list[dict[str, Any]] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": new_text}},
+            {
+                "type": "image",
+                "image_url": gif_url,
+                "alt_text": alt,
+                "title": {"type": "plain_text", "text": title_text},
+            },
+        ]
+        return new_text, built_blocks
+
+    return text, None
 
 
 __all__ = [

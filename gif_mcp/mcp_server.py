@@ -51,7 +51,7 @@ gif_service = GifService()
 )
 def search_gifs(request: SearchGifsRequest) -> dict:
     """
-    Search for GIFs using available APIs (Giphy, Tenor, or mock fallback).
+    Search for GIFs using available APIs (Giphy or Tenor). Requires API keys.
 
     Args:
         request (SearchGifsRequest):
@@ -75,7 +75,7 @@ def search_gifs(request: SearchGifsRequest) -> dict:
 )
 def get_random_gif(request: GetRandomGifRequest) -> dict:
     """
-    Get a random GIF from available APIs.
+    Get a random GIF from available APIs. Requires API keys.
 
     Args:
         request (GetRandomGifRequest):
@@ -96,7 +96,7 @@ def get_random_gif(request: GetRandomGifRequest) -> dict:
 )
 def get_trending_gifs(request: GetTrendingGifsRequest) -> dict:
     """
-    Get trending GIFs from available APIs.
+    Get trending GIFs from available APIs. Requires API keys.
 
     Args:
         request (GetTrendingGifsRequest):
@@ -108,99 +108,6 @@ def get_trending_gifs(request: GetTrendingGifsRequest) -> dict:
         dict: Trending GIFs response with metadata.
     """
     result = gif_service.get_trending_gifs(request)
-    return result.model_dump()
-
-
-@mcp.tool(
-    name="format_gif_for_slack",
-    description="Format a GIF result for Slack display with rich blocks.",
-    tags=["gifs", "slack", "formatting"],
-)
-def format_gif_for_slack(gif_data: dict, message: str = "") -> dict:
-    """
-    Format a GIF result for Slack display with rich formatting blocks.
-
-    Args:
-        gif_data (dict): GIF result data from search or random endpoints.
-        message (str, optional): Custom text message to accompany the GIF.
-
-    Returns:
-        dict: Slack-formatted GIF message with blocks for rich display.
-    """
-    from gif_mcp.models import GifResult
-
-    # Convert dict back to GifResult model
-    gif = GifResult(**gif_data)
-    result = gif_service.format_for_slack(gif, message)
-    return result.model_dump()
-
-
-@mcp.tool(
-    name="search_and_format_for_slack",
-    description="Search for GIFs and format them for Slack in one operation.",
-    tags=["gifs", "search", "slack", "formatting"],
-)
-def search_and_format_for_slack(
-    query: str, message: str = "", limit: int = 5
-) -> dict:
-    """
-    Search for GIFs and format the first result for Slack display.
-
-    Args:
-        query (str): Search query for GIFs.
-        message (str, optional): Custom text message to accompany the GIF.
-        limit (int, optional): Maximum number of GIFs to search (1-10).
-
-    Returns:
-        dict: Slack-formatted GIF message with the first search result.
-    """
-    search_request = SearchGifsRequest(query=query, limit=limit)
-    search_result = gif_service.search_gifs(search_request)
-
-    if not search_result.gifs:
-        return {
-            "text": f"No GIFs found for '{query}'",
-            "gif_url": "",
-            "gif_title": "",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"No GIFs found for '{query}'",
-                    },
-                }
-            ],
-        }
-
-    # Format the first result for Slack
-    first_gif = search_result.gifs[0]
-    result = gif_service.format_for_slack(first_gif, message)
-    return result.model_dump()
-
-
-@mcp.tool(
-    name="get_random_gif_for_slack",
-    description="Get a random GIF and format it for Slack display.",
-    tags=["gifs", "random", "slack", "formatting"],
-)
-def get_random_gif_for_slack(
-    tag: str = "", message: str = "", rating: str = "g"
-) -> dict:
-    """
-    Get a random GIF and format it for Slack display.
-
-    Args:
-        tag (str, optional): Tag to filter random GIF by.
-        message (str, optional): Custom text message to accompany the GIF.
-        rating (str, optional): Content rating (g, pg, pg-13, r).
-
-    Returns:
-        dict: Slack-formatted random GIF message.
-    """
-    request = GetRandomGifRequest(tag=tag, rating=rating)
-    gif = gif_service.get_random_gif(request)
-    result = gif_service.format_for_slack(gif, message)
     return result.model_dump()
 
 
