@@ -26,6 +26,7 @@ from pprint import pprint
 
 import src.slack_blockkit as slack_blockkit
 from src.dynamodb_utils import get_approval_table
+
 MAX_BLOCKS = 50
 MAX_SECTION_CHARS = 2900  # safety < 3000
 MAX_MESSAGE_CHARS = 3000  # hard per-response character target
@@ -76,8 +77,7 @@ def _chunk_text(text: str, max_len: int) -> Iterable[str]:
     # Examples of tokens captured: "Hello world.", "How are you?", "\n\n",
     # and trailing text without terminal punctuation.
     sentence_tokens: list[str] = [
-        m.group(0)
-        for m in re.finditer(r"[^.!?\n]+[.!?]|\n+|[^.!?\n]+$", text)
+        m.group(0) for m in re.finditer(r"[^.!?\n]+[.!?]|\n+|[^.!?\n]+$", text)
     ]
 
     target_len = max(1, int(max_len * 0.75))  # favor smaller chunks
@@ -132,69 +132,54 @@ def _chunk_text(text: str, max_len: int) -> Iterable[str]:
 def _build_blocks_from_text(
     text: str, *, request_id: str | None
 ) -> tuple[list[dict[str, Any]], int]:
-    """Craft a Block Kit message from raw or markdown text.
+    """Craft Block Kit using mrkdwn sections with chunking and context.
 
     Structure:
     - Header: "Execution Result"
-    - Context: Request ID when available
+    - Context: Request ID when available (mrkdwn)
     - One or more section blocks with mrkdwn text (chunked)
-    - If text appears JSON-like, render each section inside ``` fences
     """
-    # First, try to parse text as JSON payload from an MCP tool
-    try:
-        obj = json.loads(text)
-    except Exception:
-        obj = None
-
-    # If it's a GIF payload or contains explicit blocks, construct the exact
-    # structure requested: header, context, rich text sections, then image.
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Execution Result"}},
+    # Header and context
+    blocks: list[dict[str, Any]] = [
         {
-            "type": "rich_text",
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Execution Result"},
+        },
+        {
+            "type": "context",
             "elements": [
                 {
-                    "type": "rich_text_section",
-                    "elements": [
-                        {"type": "text", "text": "Request ID: "},
-                        {"type": "text", "text": str(request_id or ""), "style": {"code": True}},
-                    ],
+                    "type": "mrkdwn",
+                    "text": f"*Request ID:* `{str(request_id or '')}`",
                 }
             ],
         },
     ]
+
     char_count = 0
+    # Preserve links as-is; chunk all text lines into mrkdwn sections
     for line in text.split("\n"):
         line = line.rstrip()
         if not line:
             continue
-        if line.startswith("https://"):
-            # Count this as a block
+        if line.startswith("https://") and len(line) < MAX_SECTION_CHARS:
             if len(blocks) >= MAX_BLOCKS:
                 break
-            blocks.append({"type": "image", "image_url": line, "alt_text": "image"})
-        else:
-            for part in _chunk_text(line + "\n", MAX_SECTION_CHARS):
-                char_count += len(part)
-                if len(blocks) >= MAX_BLOCKS:
-                    break
-                blocks.append(
-                    {
-                        "type": "rich_text",
-                        "elements": [
-                            {
-                                "type": "rich_text_section",
-                                "elements": [
-                                    {"type": "text", "text": part},
-                                ],
-                            }
-                        ],
-                    }
-                )
+            blocks.append(
+                {"type": "section", "text": {"type": "mrkdwn", "text": line}}
+            )
+            continue
+        for part in _chunk_text(line + "\n", MAX_SECTION_CHARS):
+            char_count += len(part)
+            if len(blocks) >= MAX_BLOCKS:
+                break
+            blocks.append(
+                {"type": "section", "text": {"type": "mrkdwn", "text": part}}
+            )
         if len(blocks) >= MAX_BLOCKS:
             break
 
-    return  blocks, char_count
+    return blocks, char_count
 
 
 def _paginate_blocks_for_slack_messages(
@@ -230,21 +215,6 @@ def _paginate_blocks_for_slack_messages(
 
     # Fast path: if total section chars already under max and blocks count small
     def _rich_text_len(b: dict[str, Any]) -> int:
-        if b.get("type") == "rich_text":
-            try:
-                total = 0
-                for el in b.get("elements") or []:
-                    if (el or {}).get("type") == "rich_text_section":
-                        for seg in (el.get("elements") or []):
-                            if (seg or {}).get("type") == "text":
-                                total += len(seg.get("text") or "")
-                    elif (el or {}).get("type") == "rich_text_preformatted":
-                        for seg in (el.get("elements") or []):
-                            if (seg or {}).get("type") == "text":
-                                total += len(seg.get("text") or "")
-                return total
-            except Exception:
-                return 0
         if b.get("type") == "section":
             try:
                 return len(((b.get("text") or {}).get("text")) or "")
@@ -279,15 +249,14 @@ def _paginate_blocks_for_slack_messages(
         add_chars = _rich_text_len(blk)
 
         # Determine allowed blocks for this page considering header/context on first page
-        max_blocks_this_page = MAX_BLOCKS - (len(header_context) if not pages else 0)
+        max_blocks_this_page = MAX_BLOCKS - (
+            len(header_context) if not pages else 0
+        )
 
         # If adding this block would exceed constraints, flush the page
-        if (
-            current_page
-            and (
-                current_chars + add_chars > max_chars
-                or current_block_count + 1 > max_blocks_this_page
-            )
+        if current_page and (
+            current_chars + add_chars > max_chars
+            or current_block_count + 1 > max_blocks_this_page
         ):
             flush_page(include_header=(len(pages) == 0))
 
@@ -305,7 +274,6 @@ def _paginate_blocks_for_slack_messages(
     flush_page(include_header=(len(pages) == 0))
 
     return pages
-
 
 
 def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
@@ -370,10 +338,12 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
     text = _extract_text_from_result(result_obj) or "Request completed."
 
     blocks, char_count = _build_blocks_from_text(text, request_id=request_id)
-    print(f"blocks: {json.dumps(blocks, indent=4) }")
+    print(f"blocks: {json.dumps(blocks, indent=4)}")
 
     # Split into multiple Slack messages if necessary. All pages are replies.
-    pages = _paginate_blocks_for_slack_messages(blocks, max_chars=MAX_MESSAGE_CHARS)
+    pages = _paginate_blocks_for_slack_messages(
+        blocks, max_chars=MAX_MESSAGE_CHARS
+    )
     if not pages:
         pages = [blocks]
 
@@ -390,7 +360,10 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
         )
 
     print(f"char_count: {char_count}")
-    return {"statusCode": 200, "body": {"ok": True, "posted_replies": len(pages)}}
+    return {
+        "statusCode": 200,
+        "body": {"ok": True, "posted_replies": len(pages)},
+    }
 
 
 if __name__ == "__main__":
@@ -401,8 +374,8 @@ if __name__ == "__main__":
         "execute_result": {
             "statusCode": 200,
             "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*"
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
             },
             # "body": "Here's a cute cat GIF for you.\n\nEnjoy this adorable feline friend!\n\nhttps://media.tenor.com/0Q5IZ6e9pC8AAAAC/cat-cute-cat.gif\n\n"
             "body": """Based on the ClaimInformatics RAPID POC SOW document, here is the requested information:
@@ -412,7 +385,23 @@ if __name__ == "__main__":
 1. Insurance policy document analysis for compliance verification
 2. Prompt-based report generation system for querying claim data
 ### Project Summary:
-The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution."""
-        }
+The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution. The ClaimInformatics AI Compliance POC successfully demonstrated the feasibility of using generative AI to enhance fiduciary oversight and payment integrity for self-funded healthcare plans. Leveraging AWS Bedrock for AI insights and Amazon Comprehend Medical for medical terminology extraction, the solution effectively analyzed insurance policy documents to verify compliance requirements and developed an intuitive prompt-based reporting system that allowed users to query claims data using natural language. The proof-of-concept implementation utilized AWS S3 for data storage, AWS Lambda for serverless computing, and Amazon API Gateway to create a seamless user interface. This innovative approach significantly reduced manual effort in compliance verification while enabling stakeholders to quickly generate custom reports from complex healthcare claims data, ultimately providing a foundation for a more comprehensive production solution.""",
+        },
+    }
+    print(lambda_handler(event, {}))
+
+
+if __name__ == "__main__":
+    event = {
+        "request_id": "94253e3539b308f552df3e08185fcc197bda6b807f6874b67a9d7ad317d624d0",
+        "execute_result": {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+            },
+            "body": """
+            """,
+        },
     }
     print(lambda_handler(event, {}))

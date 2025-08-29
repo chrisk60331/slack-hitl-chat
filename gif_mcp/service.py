@@ -18,6 +18,7 @@ from .models import (
 
 dotenv.load_dotenv()
 
+
 class GifService:
     """Service for interacting with GIF APIs and formatting responses for Slack."""
 
@@ -50,7 +51,9 @@ class GifService:
             return self._search_giphy(request)
         if provider == GifSource.tenor:
             return self._search_tenor(request)
-        raise ValueError("No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY.")
+        raise ValueError(
+            "No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY."
+        )
 
     def get_random_gif(self, request: GetRandomGifRequest) -> GifResult:
         """
@@ -68,7 +71,9 @@ class GifService:
             return self._get_random_giphy(request)
         if provider == GifSource.tenor:
             return self._get_random_tenor(request)
-        raise ValueError("No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY.")
+        raise ValueError(
+            "No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY."
+        )
 
     def get_trending_gifs(
         self, request: GetTrendingGifsRequest
@@ -88,7 +93,9 @@ class GifService:
             return self._get_trending_giphy(request)
         if provider == GifSource.tenor:
             return self._get_trending_tenor(request)
-        raise ValueError("No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY.")
+        raise ValueError(
+            "No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY."
+        )
 
     def format_for_slack(
         self, gif: GifResult, message: str = ""
@@ -131,7 +138,9 @@ class GifService:
             text=text, gif_url=gif.url, gif_title=gif.title, blocks=blocks
         )
 
-    def _resolve_provider(self, preferred: GifSource | str | None) -> GifSource:
+    def _resolve_provider(
+        self, preferred: GifSource | str | None
+    ) -> GifSource:
         """Resolve which provider to use given preference and available API keys.
 
         Args:
@@ -145,14 +154,18 @@ class GifService:
             try:
                 preferred = GifSource(preferred)
             except Exception as exc:  # invalid provider value
-                raise ValueError(f"Unsupported GIF provider: {preferred}") from exc
+                raise ValueError(
+                    f"Unsupported GIF provider: {preferred}"
+                ) from exc
         # If preferred is giphy but no key, fallback to tenor/mock
         if preferred == GifSource.giphy:
             if self.giphy_api_key:
                 return GifSource.giphy
             if self.tenor_api_key:
                 return GifSource.tenor
-            raise ValueError("Giphy requested but GIPHY_API_KEY is not set; no alternative provider available")
+            raise ValueError(
+                "Giphy requested but GIPHY_API_KEY is not set; no alternative provider available"
+            )
 
         # If preferred is tenor but no key, fallback to giphy/mock
         if preferred == GifSource.tenor:
@@ -160,14 +173,18 @@ class GifService:
                 return GifSource.tenor
             if self.giphy_api_key:
                 return GifSource.giphy
-            raise ValueError("Tenor requested but TENOR_API_KEY is not set; no alternative provider available")
+            raise ValueError(
+                "Tenor requested but TENOR_API_KEY is not set; no alternative provider available"
+            )
 
         # No preference: choose by availability defaulting to mock
         if self.giphy_api_key:
             return GifSource.giphy
         if self.tenor_api_key:
             return GifSource.tenor
-        raise ValueError("No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY.")
+        raise ValueError(
+            "No GIF providers configured. Set GIPHY_API_KEY or TENOR_API_KEY."
+        )
 
     def _search_giphy(self, request: SearchGifsRequest) -> SearchGifsResponse:
         """Search GIFs using Giphy API."""
@@ -195,7 +212,9 @@ class GifService:
                 width=int(gif_data["images"]["original"]["width"]),
                 height=int(gif_data["images"]["original"]["height"]),
                 size=(
-                    int(gif_data["images"]["original"]["size"]) if gif_data["images"]["original"]["size"] else None
+                    int(gif_data["images"]["original"]["size"])
+                    if gif_data["images"]["original"]["size"]
+                    else None
                 ),
                 source="giphy",
             )
@@ -269,7 +288,9 @@ class GifService:
             width=int(gif_data["images"]["original"]["width"]),
             height=int(gif_data["images"]["original"]["height"]),
             size=(
-                int(gif_data["images"]["original"]["size"]) if gif_data["images"]["original"]["size"] else None
+                int(gif_data["images"]["original"]["size"])
+                if gif_data["images"]["original"]["size"]
+                else None
             ),
             source="giphy",
         )
@@ -312,7 +333,9 @@ class GifService:
                 width=int(gif_data["images"]["original"]["width"]),
                 height=int(gif_data["images"]["original"]["height"]),
                 size=(
-                    int(gif_data["images"]["original"]["size"]) if gif_data["images"]["original"]["size"] else None
+                    int(gif_data["images"]["original"]["size"])
+                    if gif_data["images"]["original"]["size"]
+                    else None
                 ),
                 source="giphy",
             )

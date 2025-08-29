@@ -215,24 +215,18 @@ class AgentOrchestrator:
                 }
             )
             try:
-                created_id = resp.get("body", {}).get(
-                    "request_id"
-                )  # type: ignore[union-attr]
+                created_id = resp.get("body", {}).get("request_id")  # type: ignore[union-attr]
                 print(
-
-                        "Approval created: local_request_id="
-                        f"{item.request_id} handler_request_id={created_id}"
-
+                    "Approval created: local_request_id="
+                    f"{item.request_id} handler_request_id={created_id}"
                 )
             except Exception:
                 created_id = None
                 # Best-effort diagnostic; do not change behavior if response
                 # format differs
                 print(
-
-                        "Approval created: local_request_id="
-                        f"{item.request_id} (handler response not loggable)"
-
+                    "Approval created: local_request_id="
+                    f"{item.request_id} (handler response not loggable)"
                 )
             # Use handler-generated id when available so polling matches the
             # stored record
@@ -272,11 +266,9 @@ class AgentOrchestrator:
 
         deadline = time.time() + timeout_seconds
         print(
-
-                "Starting approval polling: "
-                f"request_id={request_id} timeout_seconds={timeout_seconds} "
-                f"poll_interval={poll_interval}"
-
+            "Starting approval polling: "
+            f"request_id={request_id} timeout_seconds={timeout_seconds} "
+            f"poll_interval={poll_interval}"
         )
         while time.time() < deadline:
             item = get_approval_status(request_id)
@@ -285,17 +277,13 @@ class AgentOrchestrator:
                 ApprovalOutcome.DENY,
             }:
                 print(
-
-                        "Approval item found: "
-                        f"request_id={request_id} status={item.approval_status}"
-
+                    "Approval item found: "
+                    f"request_id={request_id} status={item.approval_status}"
                 )
                 return item.approval_status
             print(
-
-                    "Approval not yet decided for "
-                    f"request_id={request_id}; sleeping {poll_interval}s"
-
+                "Approval not yet decided for "
+                f"request_id={request_id}; sleeping {poll_interval}s"
             )
             time.sleep(poll_interval)
         print(f"Approval polling timed out for request_id={request_id}")

@@ -18,13 +18,11 @@ def test_sentence_first_chunking_prefers_smaller_chunks() -> None:
     # Expect at least 3 chunks given short max_len and preference for smaller chunks
     assert len(chunks) >= 3
     # Chunks should end with sentence punctuation where possible
-    assert any(c.strip().endswith(('.', '!', '?')) for c in chunks)
+    assert any(c.strip().endswith((".", "!", "?")) for c in chunks)
 
 
 def test_long_sentence_word_split_then_hard_slice() -> None:
-    long_sentence = (
-        "ThisIsAnExtremelyLongSingleWordThatExceedsTheLimitByItselfWithoutSpaces"
-    )
+    long_sentence = "ThisIsAnExtremelyLongSingleWordThatExceedsTheLimitByItselfWithoutSpaces"
     # Add some surrounding text to ensure flushing behavior
     text = f"Intro. {long_sentence} Outro."
     chunks = collect_chunks(text, max_len=20)
@@ -44,7 +42,3 @@ def test_newlines_are_respected_as_boundaries() -> None:
 def test_zero_or_negative_max_len_returns_empty() -> None:
     assert collect_chunks("anything", 0) == []
     assert collect_chunks("anything", -5) == []
-
-
-
-

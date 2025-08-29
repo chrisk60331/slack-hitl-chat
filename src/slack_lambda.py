@@ -279,9 +279,10 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     user_text = event_obj.get("text", "")
     action_text = event_obj.get("text", "")
     request_id = compute_request_id_from_action(action_text)
-    requester_email = slack_userid_to_email(
-        user, os.environ.get("SLACK_BOT_TOKEN", "")
-    ) or ""
+    requester_email = (
+        slack_userid_to_email(user, os.environ.get("SLACK_BOT_TOKEN", ""))
+        or ""
+    )
     print(f"requester_email: {requester_email}")
 
     # Lazy init approval table to avoid import-time AWS connections (eases tests)
@@ -386,7 +387,10 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             channel_id, thread_ts, token=bot_token, max_messages=50
         )
         thread_context = build_thread_context(
-            thread_messages, bot_user_id=bot_user_id, max_turns=12, max_chars=4000
+            thread_messages,
+            bot_user_id=bot_user_id,
+            max_turns=12,
+            max_chars=4000,
         )
     except Exception:
         thread_context = ""

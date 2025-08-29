@@ -107,12 +107,20 @@ def test_events_handler_posts_initial_message(
     }
 
     # Also patch Slack thread context helpers to avoid external calls
-    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
-        "src.slack_lambda.fetch_thread_messages", return_value=[
-            {"user": "U1", "text": "hi"},
-            {"user": "U_BOT", "text": "hello"},
-        ]
-    ), patch("src.slack_lambda.build_thread_context", return_value="user: hi\nassistant: hello"):
+    with (
+        patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"),
+        patch(
+            "src.slack_lambda.fetch_thread_messages",
+            return_value=[
+                {"user": "U1", "text": "hi"},
+                {"user": "U_BOT", "text": "hello"},
+            ],
+        ),
+        patch(
+            "src.slack_lambda.build_thread_context",
+            return_value="user: hi\nassistant: hello",
+        ),
+    ):
         resp = events_handler(event, None)
     assert resp["statusCode"] == 200
 
@@ -171,11 +179,16 @@ def test_events_handler_dedup_on_retry(
 
     # First delivery
     event1 = {"headers": {}, "body": json.dumps(base_body)}
-    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
-        "src.slack_lambda.fetch_thread_messages", return_value=[
-            {"user": "U1", "text": "hello"}
-        ]
-    ), patch("src.slack_lambda.build_thread_context", return_value="user: hello"):
+    with (
+        patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"),
+        patch(
+            "src.slack_lambda.fetch_thread_messages",
+            return_value=[{"user": "U1", "text": "hello"}],
+        ),
+        patch(
+            "src.slack_lambda.build_thread_context", return_value="user: hello"
+        ),
+    ):
         resp1 = events_handler(event1, None)
     assert resp1["statusCode"] == 200
 
@@ -187,11 +200,16 @@ def test_events_handler_dedup_on_retry(
         },
         "body": json.dumps(base_body),
     }
-    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
-        "src.slack_lambda.fetch_thread_messages", return_value=[
-            {"user": "U1", "text": "hello"}
-        ]
-    ), patch("src.slack_lambda.build_thread_context", return_value="user: hello"):
+    with (
+        patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"),
+        patch(
+            "src.slack_lambda.fetch_thread_messages",
+            return_value=[{"user": "U1", "text": "hello"}],
+        ),
+        patch(
+            "src.slack_lambda.build_thread_context", return_value="user: hello"
+        ),
+    ):
         resp2 = events_handler(event2, None)
     assert resp2["statusCode"] == 200
 
@@ -252,12 +270,20 @@ def test_app_mention_posts_initial_message(
         ),
     }
 
-    with patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"), patch(
-        "src.slack_lambda.fetch_thread_messages", return_value=[
-            {"user": "U1", "text": "help"},
-            {"user": "U_BOT", "text": "ok"},
-        ]
-    ), patch("src.slack_lambda.build_thread_context", return_value="user: help\nassistant: ok"):
+    with (
+        patch("src.slack_lambda.get_bot_user_id", return_value="U_BOT"),
+        patch(
+            "src.slack_lambda.fetch_thread_messages",
+            return_value=[
+                {"user": "U1", "text": "help"},
+                {"user": "U_BOT", "text": "ok"},
+            ],
+        ),
+        patch(
+            "src.slack_lambda.build_thread_context",
+            return_value="user: help\nassistant: ok",
+        ),
+    ):
         resp = events_handler(event, None)
     assert resp["statusCode"] == 200
     called_urls = [

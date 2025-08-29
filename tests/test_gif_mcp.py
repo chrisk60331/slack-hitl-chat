@@ -245,6 +245,7 @@ class TestGifService:
         request = SearchGifsRequest(query="test query")
         with pytest.raises(ValueError):
             service.search_gifs(request)
+
     @patch("requests.get")
     def test_force_tenor_without_key_raises(self, mock_get, service):
         """Explicit tenor source without key raises."""
@@ -256,7 +257,9 @@ class TestGifService:
             service.search_gifs(request)
 
     @patch("requests.get")
-    def test_force_giphy_with_key(self, mock_get, service, mock_giphy_response):
+    def test_force_giphy_with_key(
+        self, mock_get, service, mock_giphy_response
+    ):
         """Explicit giphy source uses giphy when key present."""
         mock_response = Mock()
         mock_response.json.return_value = mock_giphy_response

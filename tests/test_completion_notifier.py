@@ -61,8 +61,8 @@ def test_notifier_crafts_blocks_from_text(
     blocks = mock_post.call_args.kwargs.get("blocks")
     assert isinstance(blocks, list) and len(blocks) >= 2
     assert blocks[0]["type"] == "header"
-    # Rich text is now used for content sections
-    assert any(b["type"] == "rich_text" for b in blocks)
+    # Markdown sections are used for content
+    assert any(b["type"] == "section" for b in blocks)
 
 
 @patch("boto3.resource")

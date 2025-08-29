@@ -353,7 +353,9 @@ def get_bot_user_id(token: str, *, timeout_seconds: int = 5) -> str | None:
     }
     try:
         resp = requests.post(
-            "https://slack.com/api/auth.test", headers=headers, timeout=timeout_seconds
+            "https://slack.com/api/auth.test",
+            headers=headers,
+            timeout=timeout_seconds,
         )
         data = resp.json()
         if data.get("ok"):
@@ -391,7 +393,11 @@ def fetch_thread_messages(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    params: dict[str, str] = {"channel": channel_id, "ts": thread_ts, "limit": "200"}
+    params: dict[str, str] = {
+        "channel": channel_id,
+        "ts": thread_ts,
+        "limit": "200",
+    }
 
     messages: list[dict[str, Any]] = []
     cursor: str | None = None

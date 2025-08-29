@@ -66,13 +66,13 @@ uv run ruff check
 uv run ruff format
 ```
 
-### Slack threaded replies, Block Kit, and 3000-char paging
+### Slack threaded replies, Block Kit, mrkdwn, and 3000-char paging
 
 Slack interactions always reply in a thread anchored to the user's original message. The initial bot reply includes `thread_ts` so all subsequent messages remain scoped to that thread for clear request↔response mapping.
 
-When an approved action completes, the completion notifier now posts the result as one or more threaded replies (no update of the original message). If the execution result contains a `blocks` array (Slack Block Kit or rich text), those blocks are used as-is. Otherwise, a concise Block Kit message is synthesized from the result text.
+When an approved action completes, the completion notifier posts the result as one or more threaded replies (no update of the original message). If the execution result contains a `blocks` array, those blocks are used as-is. Otherwise, a concise Block Kit message is synthesized using `mrkdwn` section blocks from the result text.
 
-Slack imposes a limit of roughly 3000 characters per message section. The notifier automatically paginates long outputs: it posts multiple replies in order within the same thread. This avoids Slack list-numbering glitches on updates and preserves formatting.
+Slack imposes a limit of roughly 3000 characters per message section. The notifier automatically paginates long outputs: it posts multiple replies in order within the same thread to avoid Slack's “Show more” truncation. This avoids list-numbering glitches on updates and preserves markdown formatting.
 
 Set the bot token:
 
