@@ -16,8 +16,10 @@ from botocore.config import Config as BotoConfig
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+
 # load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
+MAX_TOKENS = 4095
 # Set up logging
 logger = logging.getLogger(__name__)
 print(f"Logger: {logger}")
@@ -372,7 +374,7 @@ class MCPClient:
             # Prepare request body for Bedrock
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 2000,  # Increased token limit
+                "max_tokens": MAX_TOKENS,  # Increased token limit
                 "messages": messages,
                 "tools": available_tools,
                 "system": SYSTEM_PROMPT,
@@ -489,7 +491,7 @@ class MCPClient:
         """
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2000,
+            "max_tokens": MAX_TOKENS,
             "messages": [
                 {"role": "user", "content": [{"type": "text", "text": query}]}
             ],
@@ -591,7 +593,7 @@ class MCPClient:
         for _iter in range(MAX_ITERATIONS):
             request_body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 2000,
+                "max_tokens": MAX_TOKENS,
                 "messages": messages,
                 "tools": available_tools,
                 "system": SYSTEM_PROMPT,

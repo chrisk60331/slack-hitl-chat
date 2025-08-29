@@ -224,7 +224,7 @@ def _has_request_id_for_status_check(event: dict[str, Any]) -> bool:
     """Check if the event has a request_id for status checking."""
     # Check various possible locations for request_id in Step Functions input
     # Direct access to request_id
-    if event.get("request_id"):
+    if event.get("request_id") or event.get("Input").get("request_id"):
         return True
 
     # Step Functions Input format
@@ -255,6 +255,9 @@ def _extract_request_id_for_status_check(event: dict[str, Any]) -> str:
     # Try direct access first
     if event.get("request_id"):
         return event["request_id"]
+
+    if event.get("Input", {}).get("request_id"):
+        return event["Input"]["request_id"]
 
     # Step Functions Input format
     if event.get("Input", {}).get("body", {}).get("request_id"):
@@ -493,7 +496,7 @@ def send_notifications(
     notification_sent = False
     proposed_action = proposed_action.replace("<@U099WCH3GM9>", "").strip()
     # Prepare message content
-    if action == "pending":
+    if action == ApprovalOutcome.REQUIRE_APPROVAL:
         action_text = "Pending Approval"
         status = "pending"
     elif action == ApprovalOutcome.ALLOW:
@@ -525,11 +528,11 @@ def send_notifications(
         "reason": reason,
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
-    print(f"message_content {message_content}")
+
     # Slack notifications (Block Kit only)
     try:
         slack_channel_id = os.environ.get("SLACK_CHANNEL_ID")
-        if slack_channel_id and action == "pending":
+        if slack_channel_id and action == ApprovalOutcome.REQUIRE_APPROVAL:
             approve_value = json.dumps(
                 {"request_id": request_id, "action": ApprovalOutcome.ALLOW},
                 separators=(",", ":"),
@@ -811,3 +814,14 @@ def read_messages_from_test_queue(
     except Exception as e:
         print(f"Error reading messages from queue: {e}")
         return []
+
+
+if __name__ == "__main__":
+    lambda_handler(
+        {
+            "Input": {
+                "proposed_action": "[Slack thread context]\nuser: <@U099WCH3GM9> grant access for <mailto:test_user@newmathdata.com|test_user@newmathdata.com> on aws project `arn:aws:iam::244416334102:role/NMD-Admin-Lutely,arn:aws:iam::244416334102:saml-provider/NMDGoogle`\n\nUser: <@U099WCH3GM9> grant access for <mailto:test_user@newmathdata.com|test_user@newmathdata.com> on aws project `arn:aws:iam::244416334102:role/NMD-Admin-Lutely,arn:aws:iam::244416334102:saml-provider/NMDGoogle`"
+            }
+        },
+        {},
+    )

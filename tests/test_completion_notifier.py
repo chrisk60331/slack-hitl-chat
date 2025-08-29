@@ -5,9 +5,9 @@ from src.completion_notifier import lambda_handler
 
 
 @patch("boto3.resource")
-@patch("src.slack_blockkit.update_message")
-def test_notifier_updates_slack(
-    mock_update: MagicMock, mock_resource: MagicMock
+@patch("src.slack_blockkit.post_message_with_response")
+def test_notifier_posts_reply_only(
+    mock_post: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -27,16 +27,15 @@ def test_notifier_updates_slack(
     event = {"request_id": "r1", "result": {"body": {"msg": "done"}}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    mock_update.assert_called_once()
-    # update_message(channel, ts, ...)
-    assert mock_update.call_args.args[0] == "C1"
-    assert mock_update.call_args.args[1] == "t1"
+    # Small payload should still post a single threaded reply
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs.get("thread_ts") == "t1"
 
 
 @patch("boto3.resource")
-@patch("src.slack_blockkit.update_message")
+@patch("src.slack_blockkit.post_message_with_response")
 def test_notifier_crafts_blocks_from_text(
-    mock_update: MagicMock, mock_resource: MagicMock
+    mock_post: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -56,20 +55,20 @@ def test_notifier_crafts_blocks_from_text(
     event = {"request_id": "r2", "result": {"body": "*Done*"}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    # Ensure update called with blocks in kwargs
-    assert mock_update.called
-    assert mock_update.call_args.args[0] == "C2"
-    assert mock_update.call_args.args[1] == "t2"
-    blocks = mock_update.call_args.kwargs.get("blocks")
+    assert mock_post.called
+    # Ensure reply called with blocks in kwargs
+    assert mock_post.call_args.kwargs.get("thread_ts") == "t2"
+    blocks = mock_post.call_args.kwargs.get("blocks")
     assert isinstance(blocks, list) and len(blocks) >= 2
     assert blocks[0]["type"] == "header"
-    assert any(b["type"] == "section" for b in blocks)
+    # Rich text is now used for content sections
+    assert any(b["type"] == "rich_text" for b in blocks)
 
 
 @patch("boto3.resource")
-@patch("src.slack_blockkit.update_message")
-def test_notifier_chunks_long_text_into_multiple_sections(
-    mock_update: MagicMock, mock_resource: MagicMock
+@patch("src.slack_blockkit.post_message_with_response")
+def test_notifier_chunks_long_text_into_multiple_replies(
+    mock_post: MagicMock, mock_resource: MagicMock
 ) -> None:
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["TABLE_NAME"] = "tbl"
@@ -90,14 +89,11 @@ def test_notifier_chunks_long_text_into_multiple_sections(
     event = {"request_id": "r3", "result": {"body": long_text}}
     resp = lambda_handler(event, None)
     assert resp["statusCode"] == 200
-    assert mock_update.called
-    assert mock_update.call_args.args[0] == "C3"
-    assert mock_update.call_args.args[1] == "t3"
-    blocks = mock_update.call_args.kwargs.get("blocks")
-    assert isinstance(blocks, list)
-    # header + context + >= 2 sections
-    section_blocks = [b for b in blocks if b.get("type") == "section"]
-    assert len(section_blocks) >= 2
+    # All pages should be replies
+    assert mock_post.called
+    # Ensure continuation posts are threaded replies
+    for call in mock_post.call_args_list:
+        assert call.kwargs.get("thread_ts") == "t3"
 
 
 @patch("boto3.resource")

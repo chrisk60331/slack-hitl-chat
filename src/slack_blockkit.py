@@ -74,10 +74,20 @@ def post_message(
     thread_ts: str | None = None,
 ) -> bool:
     """Post a Block Kit message to a channel (with optional thread)."""
-    data = post_message_with_response(
-        channel, text, token=token, blocks=blocks, thread_ts=thread_ts
+    # data = post_message_with_response(
+    #     channel, text, token=token, blocks=blocks, thread_ts=thread_ts
+    # )
+    # return bool(data.get("ok"))
+    print(f"\n\nblocks: {blocks}\n\n{os.environ.get('SLACK_WEBHOOK_URL')}")
+    payload = {"blocks": blocks}
+    resp = requests.post(
+        os.environ.get("SLACK_WEBHOOK_URL"),
+        data=json.dumps(payload),
+        headers={"Content-Type": "application/json"},
+        timeout=10,
     )
-    return bool(data.get("ok"))
+    print(vars(resp))
+    return bool(resp.status_code == 200)
 
 
 def update_message(
