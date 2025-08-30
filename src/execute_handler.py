@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.approval_handler import COMPLETION_STATUS, get_approval_status
 from src.mcp_client import MCPClient
+from src.policy import ApprovalOutcome
 
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
@@ -135,11 +136,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 raise ValueError(
                     f"Request ID {execution_request.request_id} not found in approval log"
                 )
-            if approval_item.approval_status != "approve":
+            if approval_item.approval_status != ApprovalOutcome.ALLOW:
                 raise ValueError(
                     f"Request {execution_request.request_id} is not approved (status: {approval_item.approval_status})"
                 )
-            elif approval_item.approval_status == "approve":
+            elif approval_item.approval_status == ApprovalOutcome.ALLOW:
                 action_text = approval_item.proposed_action
                 request_id = execution_request.request_id or "direct_execution"
                 logger.error(

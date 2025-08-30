@@ -85,31 +85,6 @@ markers = [
 source = ["src"]
 branch = true
 
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
-
-[tool.black]
-target-version = ["py311"]
-line-length = 79
-extend-exclude = '''
-/(
-  # The following are specific to Black, you probably don't want those.
-  migrations
-  | .venv
-)/
-'''
-
 [tool.ruff]
 target-version = "py311"
 line-length = 79

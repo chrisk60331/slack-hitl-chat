@@ -8,6 +8,7 @@ notifications to Slack (Block Kit) and optionally SNS.
 import hashlib
 import json
 import os
+import traceback
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -26,6 +27,7 @@ from src.policy import (
 )
 from src.slack_blockkit import (
     build_approval_blocks,
+    get_header_and_context,
     post_message,
     update_message,
 )
@@ -39,16 +41,27 @@ class COMPLETION_STATUS(Enum):
     CANCELED: str = "canceled"
 
 
+class APPROVAL_COMMUNICATION_STATUS(Enum):
+    NOT_SENT: str = "not_sent"
+    SENT: str = "sent"
+    COMPLETED: str = "completed"
+    FAILED: str = "failed"
+    CANCELED: str = "canceled"
+
+
 class ApprovalItem(BaseModel):
     """Pydantic model for approval request items."""
 
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    approval_communication_status: str = (
+        APPROVAL_COMMUNICATION_STATUS.NOT_SENT.value
+    )
     requester: str = ""
     approver: str = ""
     agent_prompt: str = ""
     proposed_action: str = ""
     reason: str = ""
-    approval_status: str = "pending"
+    approval_status: ApprovalOutcome = ApprovalOutcome.REQUIRE_APPROVAL
     timestamp: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat()
     )
@@ -68,6 +81,15 @@ class ApprovalItem(BaseModel):
         return cls(**item)
 
 
+class ApprovalDecision(BaseModel):
+    """Pydantic model for approval decision requests."""
+
+    request_id: str
+    action: ApprovalOutcome = ApprovalOutcome.REQUIRE_APPROVAL
+    approver: str = ""
+    reason: str = ""
+
+
 def compute_request_id_from_action(action_text: str) -> str:
     """Compute a deterministic request_id from the proposed action text.
 
@@ -85,15 +107,6 @@ def compute_request_id_from_action(action_text: str) -> str:
     return digest
 
 
-class ApprovalDecision(BaseModel):
-    """Pydantic model for approval decision requests."""
-
-    request_id: str
-    action: str = Field(..., pattern="^(approve|reject)$")
-    approver: str = ""
-    reason: str = ""
-
-
 # Initialize AWS clients
 sns = boto3.client("sns", region_name=os.environ["AWS_REGION"])
 # Configuration
@@ -102,10 +115,19 @@ SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 
 
 # Helper to update Slack message thread
-def _slack_update(slack_channel: str, slack_ts: str, text: str) -> None:
+def _slack_update(
+    slack_channel: str, slack_ts: str, text: str, blocks: list[dict[str, Any]]
+) -> None:
     try:
         if slack_channel and slack_ts:
-            update_message(slack_channel, slack_ts, text=text)
+            print(
+                f"slack_channel {slack_channel} slack_ts {slack_ts} text {text} blocks {blocks}"
+            )
+            print(
+                update_message(
+                    slack_channel, slack_ts, text=text, blocks=blocks
+                )
+            )
     except Exception as e:  # pragma: no cover - best effort
         print(f"Slack update failed: {e}")
 
@@ -145,9 +167,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     import base64
     import json
-    import urllib
+    from urllib.parse import unquote
 
-    print(f"Approval handler received event: {event}")
+    print(f"Approval handler received event: {event}\n\n")
     try:
         # Handle approval decision (POST with approval data)
         # Opportunistic validation to surface parsing errors early (helps tests and debugging)
@@ -160,9 +182,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     for g in [
                         f.get("elements")
                         for f in json.loads(
-                            urllib.parse.unquote(
-                                base64.b64decode(body)
-                            ).replace("payload=", "")
+                            unquote(base64.b64decode(body)).replace(
+                                "payload=", ""
+                            )
                         )
                         .get("message")
                         .get("blocks")
@@ -171,41 +193,33 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 }
             )[0]
             event["body"]["action"] = json.loads(
-                urllib.parse.unquote(base64.b64decode(body)).replace(
-                    "payload=", ""
-                )
+                unquote(base64.b64decode(body)).replace("payload=", "")
             )["actions"][0]["action_id"]
-            print(f"transformed event {event}")
-        if body is not None:
-            try:
-                # This will raise if body is invalid JSON when provided as a string
-                _ = _extract_decision_data({"body": event})
-            except Exception:
-                # Re-raise to be handled by the generic error block below
-                raise
+            print(f"transformed event {event}\n\n")
 
+        print(f"event {event}\n\n")
         # Route the request
         if _is_approval_decision(event):
+            print(f"_is_approval_decision event {event}+\n\n")
             return _handle_approval_decision(event)
 
         # Handle status check (existing request ID lookup)
-        elif _has_request_id_for_status_check(event):
-            return _handle_status_check(event)
-
-        # Handle new approval request creation
         else:
-            return _handle_new_approval_request(event)
+            print(f"_has_request_id_for_status_check event {event}")
+            return _handle_status_check(event)
 
     except Exception as e:
         error_response = {"error": "operation failed", "details": str(e)}
         print(f"error_response {error_response}")
+        traceback.print_exc()
         return {"statusCode": 500, "body": json.dumps(error_response)}
 
 
-def _is_approval_decision(event: dict[str, Any]) -> bool:
+def _is_approval_decision(event) -> bool:
     """Check if the event represents an approval decision."""
     # Check for direct approval decision in body
-    body = event.get("body")
+    body = event.get("body") or event.get("Input", {}).get("body")
+    print("body", body)
     if isinstance(body, str):
         try:
             parsed_body = json.loads(body)
@@ -214,40 +228,8 @@ def _is_approval_decision(event: dict[str, Any]) -> bool:
             pass
     elif isinstance(body, dict):
         return "action" in body and "request_id" in body
-
-    # Check for query parameters (for GET requests with approval)
     query_params = event.get("queryStringParameters") or {}
     return "action" in query_params and "request_id" in query_params
-
-
-def _has_request_id_for_status_check(event: dict[str, Any]) -> bool:
-    """Check if the event has a request_id for status checking."""
-    # Check various possible locations for request_id in Step Functions input
-    # Direct access to request_id
-    if event.get("request_id") or event.get("Input").get("request_id"):
-        return True
-
-    # Step Functions Input format
-    if event.get("Input", {}).get("body", {}).get("request_id"):
-        return True
-
-    # Direct body access
-    body = event.get("body")
-    if isinstance(body, dict) and body.get("request_id"):
-        return True
-    if isinstance(body, str):
-        try:
-            parsed = json.loads(body)
-            if isinstance(parsed, dict) and parsed.get("request_id"):
-                return True
-        except Exception:
-            pass
-
-    # Query parameters
-    if event.get("queryStringParameters", {}).get("request_id"):
-        return True
-
-    return False
 
 
 def _extract_request_id_for_status_check(event: dict[str, Any]) -> str:
@@ -287,19 +269,11 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     # Extract decision data from event
     print(f"_handle_approval_decision event {event}")
     decision_data = _extract_decision_data(event)
+    print(f"decision_data {decision_data}")
     decision = ApprovalDecision(**decision_data)
 
     # Get existing approval item
-    response = get_approval_table().get_item(
-        Key={"request_id": decision.request_id}
-    )
-    item_data = response.get("Item")
-    if not item_data:
-        raise ValueError(
-            f"Request ID {decision.request_id} not found in approval log."
-        )
-
-    approval_item = ApprovalItem.from_dynamodb_item(item_data)
+    approval_item = get_approval_status(decision_data["request_id"])
 
     # Update approval status
     approval_item.approval_status = decision.action
@@ -322,7 +296,14 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
         agent_prompt=approval_item.agent_prompt,
         proposed_action=approval_item.proposed_action,
         reason=approval_item.reason,
+        approval_status=approval_item.approval_status.value,
+        slack_ts=approval_item.slack_ts,
+        slack_channel=approval_item.slack_channel,
     )
+    approval_item.approval_communication_status = (
+        APPROVAL_COMMUNICATION_STATUS.SENT.value
+    )
+    get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
 
     response_data = {
         "request_id": approval_item.request_id,
@@ -345,23 +326,25 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
 def _extract_decision_data(event: dict[str, Any]) -> dict[str, Any]:
     """Extract decision data from various event formats."""
     # Try body first (POST requests)
-    body = event.get("body")
+    body = (
+        event.get("body")
+        or event.get("Input", {}).get("body")
+        or event.get("queryStringParameters")
+        or {}
+    )
+    print(f"\n\nbody {body}\n\n")
     if isinstance(body, str):
         try:
             return json.loads(body)
         except (json.JSONDecodeError, TypeError):
             pass
-    elif isinstance(body, dict):
-        return body
 
-    # Try query parameters (GET requests)
-    query_params = event.get("queryStringParameters") or {}
-    if "action" in query_params and "request_id" in query_params:
+    if "action" in body and "request_id" in body:
         return {
-            "request_id": query_params["request_id"],
-            "action": query_params["action"],
-            "approver": query_params.get("approver", ""),
-            "reason": query_params.get("reason", ""),
+            "request_id": body["request_id"],
+            "action": body["action"],
+            "approver": body.get("approver", ""),
+            "reason": body.get("reason", ""),
         }
 
     raise ValueError("No valid decision data found in request")
@@ -370,12 +353,7 @@ def _extract_decision_data(event: dict[str, Any]) -> dict[str, Any]:
 def _handle_status_check(event: dict[str, Any]) -> dict[str, Any]:
     """Handle existing status check requests."""
     request_id = _extract_request_id_for_status_check(event)
-    response = get_approval_table().get_item(Key={"request_id": request_id})
-    item_data = response.get("Item")
-    if not item_data:
-        raise ValueError(f"Approval request {request_id} not found")
-
-    approval_item = ApprovalItem.from_dynamodb_item(item_data)
+    approval_item = get_approval_status(request_id)
 
     response_data = {
         "request_id": approval_item.request_id,
@@ -394,7 +372,7 @@ def _handle_status_check(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
+def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     """Handle new approval request creation."""
     # Create new approval request
     if "Input" in event:
@@ -402,6 +380,7 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     print(f"_handle_new_approval_request event {event}")
 
     proposed_action_text = (event.get("proposed_action") or "").strip()
+    print(f"proposed_action_text {proposed_action_text}\n\n")
     slack_channel = event.get("slack_channel", "")
     slack_ts = event.get("slack_ts", "")
 
@@ -409,7 +388,7 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     deterministic_request_id = compute_request_id_from_action(
         proposed_action_text
     )
-
+    print(f"deterministic_request_id {deterministic_request_id}\n\n")
     # Evaluate policy using orchestrator policy code
     inferred_category, inferred_resource = infer_category_and_resource(
         proposed_action_text
@@ -422,8 +401,9 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         environment=os.getenv("ENVIRONMENT", "dev"),
         user_id=event.get("requester") or "slack_user",
     )
+    print(f"proposed_action {proposed_action}\n\n")
     decision = PolicyEngine().evaluate(proposed_action)
-
+    print(f"decision {str(decision.outcome.value)}\n\n")
     approval_item = ApprovalItem(
         request_id=deterministic_request_id,
         requester=event.get("requester", ""),
@@ -431,13 +411,13 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         agent_prompt=event.get("agent_prompt", proposed_action_text),
         proposed_action=proposed_action_text,
         reason="Allowed by policy",
-        approval_status=decision.outcome,
+        approval_status=str(decision.outcome.value),
         slack_channel=slack_channel,
         slack_ts=slack_ts,
         completion_status=str(COMPLETION_STATUS.PENDING),
         completion_message=decision.outcome,
     )
-
+    print(f"approval_item {approval_item.to_dynamodb_item()}\n\n")
     send_notifications(
         request_id=approval_item.request_id,
         action=approval_item.approval_status,
@@ -449,11 +429,19 @@ def _handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     )
 
     # Upsert record for audit/completion
+    approval_item.approval_communication_status = (
+        APPROVAL_COMMUNICATION_STATUS.SENT.value
+    )
+    print(approval_item.to_dynamodb_item())
     get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
+    blocks = get_header_and_context(
+        deterministic_request_id, f"Request {decision.outcome.value}"
+    )
     _slack_update(
         slack_channel,
         slack_ts,
         f"Request ID: {deterministic_request_id}\n{decision.rationale}",
+        blocks,
     )
     return {
         "statusCode": 200,
@@ -477,7 +465,10 @@ def send_notifications(
     agent_prompt: str,
     proposed_action: str,
     reason: str,
-) -> bool:
+    approval_status: str = None,
+    slack_ts: str = None,
+    slack_channel: str = None,
+):
     """
     Send notifications to configured channels.
 
@@ -531,8 +522,12 @@ def send_notifications(
 
     # Slack notifications (Block Kit only)
     try:
-        slack_channel_id = os.environ.get("SLACK_CHANNEL_ID")
-        if slack_channel_id and action == ApprovalOutcome.REQUIRE_APPROVAL:
+        text = f"Request {approval_status}"
+        blocks = get_header_and_context(request_id, text)
+        update_message(slack_channel, slack_ts, text=text, blocks=blocks)
+        if action == ApprovalOutcome.REQUIRE_APPROVAL and not message_content[
+            "proposed_action"
+        ].startswith("[Slack thread context]"):
             approve_value = json.dumps(
                 {"request_id": request_id, "action": ApprovalOutcome.ALLOW},
                 separators=(",", ":"),
@@ -549,11 +544,10 @@ def send_notifications(
                 approve_value=approve_value,
                 reject_value=reject_value,
             )
-            if post_message(
-                slack_channel_id, message_content["title"], blocks=blocks
-            ):
+            if post_message("foo", message_content["title"], blocks=blocks):
                 notification_sent = True
-                print(f"Slack Block Kit message sent for request {request_id}")
+                print(f"Slack notification sent for request {request_id}")
+
     except Exception as e:  # pragma: no cover - defensive
         print(f"Error sending Slack notification: {e}")
 
@@ -613,9 +607,6 @@ Note: Click the links above to approve or reject this request."""
     return base_message.strip()
 
 
-# Deprecated: Slack webhook notifications are removed in favor of Block Kit-only client
-
-
 def get_approval_status(request_id: str) -> ApprovalItem | None:
     """
     Retrieve approval status from DynamoDB.
@@ -640,188 +631,49 @@ def get_approval_status(request_id: str) -> ApprovalItem | None:
         return None
 
 
-def read_sns_messages_locally(
-    region_name: str = "us-east-1", max_messages: int = 10
-) -> list[dict[str, Any]]:
-    """
-    Read SNS messages locally for testing and debugging.
-
-    Note: This requires the SNS topic to have an SQS subscription for local testing.
-    In production, use CloudWatch logs or other monitoring tools.
-
-    Args:
-        region_name: AWS region name
-        max_messages: Maximum number of messages to retrieve
-
-    Returns:
-        List of message dictionaries
-    """
-    try:
-        import boto3
-        from botocore.exceptions import (
-            NoCredentialsError,
-            PartialCredentialsError,
-        )
-
-        # Check if we have AWS credentials
-        try:
-            session = boto3.Session()
-            credentials = session.get_credentials()
-            if not credentials:
-                print(
-                    "Warning: No AWS credentials found. Cannot read SNS messages."
-                )
-                return []
-        except (NoCredentialsError, PartialCredentialsError):
-            print("Warning: AWS credentials not configured properly.")
-            return []
-
-        # For local testing, we would typically need an SQS queue subscribed to the SNS topic
-        # This is a placeholder implementation that would need actual SQS integration
-        print(f"Reading SNS messages from region: {region_name}")
-        print(f"SNS Topic ARN: {SNS_TOPIC_ARN}")
-        print(
-            "Note: For local testing, subscribe an SQS queue to the SNS topic and read from SQS."
-        )
-
-        # TODO: Implement actual SQS message reading
-        # sqs = boto3.client('sqs', region_name=region_name)
-        # queue_url = "your-test-queue-url"  # Would need to be configured
-        # response = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=max_messages)
-        # messages = response.get('Messages', [])
-
-        return []
-
-    except Exception as e:
-        print(f"Error reading SNS messages: {e}")
-        return []
-
-
-def create_test_sqs_queue_for_sns(
-    queue_name: str = "agentcore-sns-test-queue",
-    region_name: str = "us-east-1",
-) -> str | None:
-    """
-    Create a test SQS queue and subscribe it to the SNS topic for local testing.
-
-    Args:
-        queue_name: Name for the SQS queue
-        region_name: AWS region name
-
-    Returns:
-        Queue URL if successful, None otherwise
-    """
-    try:
-        import boto3
-
-        sqs = boto3.client("sqs", region_name=region_name)
-        sns = boto3.client("sns", region_name=region_name)
-
-        # Create SQS queue
-        queue_response = sqs.create_queue(
-            QueueName=queue_name,
-            Attributes={
-                "MessageRetentionPeriod": "1209600",  # 14 days
-                "VisibilityTimeoutSeconds": "30",
-            },
-        )
-        queue_url = queue_response["QueueUrl"]
-
-        # Get queue attributes to get the ARN
-        queue_attrs = sqs.get_queue_attributes(
-            QueueUrl=queue_url, AttributeNames=["QueueArn"]
-        )
-        queue_arn = queue_attrs["Attributes"]["QueueArn"]
-
-        # Subscribe queue to SNS topic
-        if SNS_TOPIC_ARN:
-            sns.subscribe(
-                TopicArn=SNS_TOPIC_ARN, Protocol="sqs", Endpoint=queue_arn
-            )
-            print(f"Successfully created test queue: {queue_url}")
-            print(f"Subscribed to SNS topic: {SNS_TOPIC_ARN}")
-            return queue_url
-        else:
-            print("Warning: SNS_TOPIC_ARN not configured")
-            return queue_url
-
-    except Exception as e:
-        print(f"Error creating test SQS queue: {e}")
-        return None
-
-
-def read_messages_from_test_queue(
-    queue_url: str, max_messages: int = 10, region_name: str = "us-east-1"
-) -> list[dict[str, Any]]:
-    """
-    Read messages from the test SQS queue to see SNS notifications.
-
-    Args:
-        queue_url: SQS queue URL
-        max_messages: Maximum number of messages to retrieve
-        region_name: AWS region name
-
-    Returns:
-        List of parsed message dictionaries
-    """
-    try:
-        import boto3
-
-        sqs = boto3.client("sqs", region_name=region_name)
-
-        response = sqs.receive_message(
-            QueueUrl=queue_url,
-            MaxNumberOfMessages=max_messages,
-            WaitTimeSeconds=5,
-            AttributeNames=["All"],
-        )
-
-        messages = response.get("Messages", [])
-        parsed_messages = []
-
-        for message in messages:
-            try:
-                # Parse SNS message body
-                body = json.loads(message["Body"])
-                sns_message = (
-                    json.loads(body["Message"])
-                    if isinstance(body.get("Message"), str)
-                    else body.get("Message", body)
-                )
-
-                parsed_message = {
-                    "message_id": message.get("MessageId"),
-                    "receipt_handle": message.get("ReceiptHandle"),
-                    "sns_subject": body.get("Subject", ""),
-                    "sns_message": body.get("Message", ""),
-                    "parsed_content": (
-                        sns_message if isinstance(sns_message, dict) else {}
-                    ),
-                    "timestamp": body.get("Timestamp", ""),
-                    "raw_body": message["Body"],
-                }
-                parsed_messages.append(parsed_message)
-
-                # Delete message after reading (optional)
-                # sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=message['ReceiptHandle'])
-
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"Error parsing message: {e}")
-                continue
-
-        return parsed_messages
-
-    except Exception as e:
-        print(f"Error reading messages from queue: {e}")
-        return []
-
-
 if __name__ == "__main__":
     lambda_handler(
         {
-            "Input": {
-                "proposed_action": "[Slack thread context]\nuser: <@U099WCH3GM9> grant access for <mailto:test_user@newmathdata.com|test_user@newmathdata.com> on aws project `arn:aws:iam::244416334102:role/NMD-Admin-Lutely,arn:aws:iam::244416334102:saml-provider/NMDGoogle`\n\nUser: <@U099WCH3GM9> grant access for <mailto:test_user@newmathdata.com|test_user@newmathdata.com> on aws project `arn:aws:iam::244416334102:role/NMD-Admin-Lutely,arn:aws:iam::244416334102:saml-provider/NMDGoogle`"
-            }
+            "version": "2.0",
+            "routeKey": "$default",
+            "rawPath": "/",
+            "rawQueryString": "",
+            "headers": {
+                "content-length": "4070",
+                "x-amzn-tls-version": "TLSv1.3",
+                "x-forwarded-proto": "https",
+                "x-forwarded-port": "443",
+                "x-forwarded-for": "54.172.140.67",
+                "accept": "application/json,*/*",
+                "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
+                "x-amzn-trace-id": "Root=1-68b369fd-11541f9579e1fcf16144050b",
+                "host": "dcosfev3cai22cpmk5dek62ete0lklsk.lambda-url.us-west-2.on.aws",
+                "content-type": "application/x-www-form-urlencoded",
+                "x-slack-request-timestamp": "1756588540",
+                "x-slack-signature": "v0=2e90c75b5092579ae1729514133f33fbd1e0466e95b9dbc4fc850ed258d50e67",
+                "accept-encoding": "gzip,deflate",
+                "user-agent": "Slackbot 1.0 (+https://api.slack.com/robots)",
+            },
+            "requestContext": {
+                "accountId": "anonymous",
+                "apiId": "dcosfev3cai22cpmk5dek62ete0lklsk",
+                "domainName": "dcosfev3cai22cpmk5dek62ete0lklsk.lambda-url.us-west-2.on.aws",
+                "domainPrefix": "dcosfev3cai22cpmk5dek62ete0lklsk",
+                "http": {
+                    "method": "POST",
+                    "path": "/",
+                    "protocol": "HTTP/1.1",
+                    "sourceIp": "54.172.140.67",
+                    "userAgent": "Slackbot 1.0 (+https://api.slack.com/robots)",
+                },
+                "requestId": "a659fb90-cee9-4f42-b254-321da2ed8062",
+                "routeKey": "$default",
+                "stage": "$default",
+                "time": "30/Aug/2025:21:15:41 +0000",
+                "timeEpoch": 1756588541015,
+            },
+            "body": "cGF5bG9hZD0lN0IlMjJ0eXBlJTIyJTNBJTIyYmxvY2tfYWN0aW9ucyUyMiUyQyUyMnVzZXIlMjIlM0ElN0IlMjJpZCUyMiUzQSUyMlUwNTUxMEYwMVFSJTIyJTJDJTIydXNlcm5hbWUlMjIlM0ElMjJja2luZyUyMiUyQyUyMm5hbWUlMjIlM0ElMjJja2luZyUyMiUyQyUyMnRlYW1faWQlMjIlM0ElMjJUTVM1Rkg5RFklMjIlN0QlMkMlMjJhcGlfYXBwX2lkJTIyJTNBJTIyQTA5OVFIWUJUNlglMjIlMkMlMjJ0b2tlbiUyMiUzQSUyMnpHUU10R0Y5UEFlVUtrellKOUt4NXJaZCUyMiUyQyUyMmNvbnRhaW5lciUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJtZXNzYWdlJTIyJTJDJTIybWVzc2FnZV90cyUyMiUzQSUyMjE3NTY1ODg1MzIuOTUyMjk5JTIyJTJDJTIyY2hhbm5lbF9pZCUyMiUzQSUyMkMwOUJEQTFFMEhKJTIyJTJDJTIyaXNfZXBoZW1lcmFsJTIyJTNBZmFsc2UlN0QlMkMlMjJ0cmlnZ2VyX2lkJTIyJTNBJTIyOTQzMzY2MDMwNDgwNS43NDAxODU1ODc0NzQuZTA3MmIwZWI1Y2I2MDA0ZGQyZjljYzllMGE1NDg1MDQlMjIlMkMlMjJ0ZWFtJTIyJTNBJTdCJTIyaWQlMjIlM0ElMjJUTVM1Rkg5RFklMjIlMkMlMjJkb21haW4lMjIlM0ElMjJuZXdtYXRoZGF0YSUyMiU3RCUyQyUyMmVudGVycHJpc2UlMjIlM0FudWxsJTJDJTIyaXNfZW50ZXJwcmlzZV9pbnN0YWxsJTIyJTNBZmFsc2UlMkMlMjJjaGFubmVsJTIyJTNBJTdCJTIyaWQlMjIlM0ElMjJDMDlCREExRTBISiUyMiUyQyUyMm5hbWUlMjIlM0ElMjJwcml2YXRlZ3JvdXAlMjIlN0QlMkMlMjJtZXNzYWdlJTIyJTNBJTdCJTIyc3VidHlwZSUyMiUzQSUyMmJvdF9tZXNzYWdlJTIyJTJDJTIydGV4dCUyMiUzQSUyMkFnZW50Q29yZStISVRMK1BlbmRpbmcrQXBwcm92YWwrJTJBUmVxdWVzdCtJRCUzQSUyQSU1Q24wOTNiMjQyM2U4YTYzOTAxOGQ0YjRmZGFkNzdhZTJhYjA5NGU4NDUyNDkxOGNlMjk2MDdkODlkY2NlOWZiMjE4KyUyQVJlcXVlc3RlciUzQSUyQSU1Q25ja2luZyU0MG5ld21hdGhkYXRhLmNvbSslMkFQcm9wb3NlZCtBY3Rpb24lM0ElMkElNUNuaG9sYSsrY291bGQreW91K2tpbmRseStyZXZva2UrYWNjZXNzK2ZvcislM0NtYWlsdG8lM0F0ZXN0X3VzZXIlNDBuZXdtYXRoZGF0YS5jb20lN0N0ZXN0X3VzZXIlNDBuZXdtYXRoZGF0YS5jb20lM0Urb24rYXdzK3Byb2plY3QrJTYwYXJuJTNBYXdzJTNBaWFtJTNBJTNBMjg0NzM0NTk0MzEzJTNBcm9sZSU1QyUyRk5NRC1BZG1pbi1Kb3Vybnl6TmV3TWF0aCUyQ2FybiUzQWF3cyUzQWlhbSUzQSUzQTI4NDczNDU5NDMxMyUzQXNhbWwtcHJvdmlkZXIlNUMlMkZOTURHb29nbGUlNjArK3BsZWFzZSthbmQrdGhhbmsreW91JTIxK0FwcHJvdmUrYnV0dG9uK1JlamVjdCtidXR0b24lMjIlMkMlMjJ0eXBlJTIyJTNBJTIybWVzc2FnZSUyMiUyQyUyMnRzJTIyJTNBJTIyMTc1NjU4ODUzMi45NTIyOTklMjIlMkMlMjJib3RfaWQlMjIlM0ElMjJCMDlDWExaMVI4QyUyMiUyQyUyMmJsb2NrcyUyMiUzQSU1QiU3QiUyMnR5cGUlMjIlM0ElMjJoZWFkZXIlMjIlMkMlMjJibG9ja19pZCUyMiUzQSUyMmF4JTJCUnUlMjIlMkMlMjJ0ZXh0JTIyJTNBJTdCJTIydHlwZSUyMiUzQSUyMnBsYWluX3RleHQlMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyQWdlbnRDb3JlK0hJVEwrUGVuZGluZytBcHByb3ZhbCUyMiUyQyUyMmVtb2ppJTIyJTNBdHJ1ZSU3RCU3RCUyQyU3QiUyMnR5cGUlMjIlM0ElMjJzZWN0aW9uJTIyJTJDJTIyYmxvY2tfaWQlMjIlM0ElMjJrOHVmViUyMiUyQyUyMmZpZWxkcyUyMiUzQSU1QiU3QiUyMnR5cGUlMjIlM0ElMjJtcmtkd24lMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyJTJBUmVxdWVzdCtJRCUzQSUyQSU1Q24wOTNiMjQyM2U4YTYzOTAxOGQ0YjRmZGFkNzdhZTJhYjA5NGU4NDUyNDkxOGNlMjk2MDdkODlkY2NlOWZiMjE4JTIyJTJDJTIydmVyYmF0aW0lMjIlM0FmYWxzZSU3RCUyQyU3QiUyMnR5cGUlMjIlM0ElMjJtcmtkd24lMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyJTJBUmVxdWVzdGVyJTNBJTJBJTVDbiUzQ21haWx0byUzQWNraW5nJTQwbmV3bWF0aGRhdGEuY29tJTdDY2tpbmclNDBuZXdtYXRoZGF0YS5jb20lM0UlMjIlMkMlMjJ2ZXJiYXRpbSUyMiUzQWZhbHNlJTdEJTVEJTdEJTJDJTdCJTIydHlwZSUyMiUzQSUyMnNlY3Rpb24lMjIlMkMlMjJibG9ja19pZCUyMiUzQSUyMjBDNldzJTIyJTJDJTIydGV4dCUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJtcmtkd24lMjIlMkMlMjJ0ZXh0JTIyJTNBJTIyJTJBUHJvcG9zZWQrQWN0aW9uJTNBJTJBJTVDbmhvbGErK2NvdWxkK3lvdStraW5kbHkrcmV2b2tlK2FjY2Vzcytmb3IrJTNDbWFpbHRvJTNBdGVzdF91c2VyJTQwbmV3bWF0aGRhdGEuY29tJTdDdGVzdF91c2VyJTQwbmV3bWF0aGRhdGEuY29tJTNFK29uK2F3cytwcm9qZWN0KyU2MGFybiUzQWF3cyUzQWlhbSUzQSUzQTI4NDczNDU5NDMxMyUzQXJvbGUlNUMlMkZOTUQtQWRtaW4tSm91cm55ek5ld01hdGglMkNhcm4lM0Fhd3MlM0FpYW0lM0ElM0EyODQ3MzQ1OTQzMTMlM0FzYW1sLXByb3ZpZGVyJTVDJTJGTk1ER29vZ2xlJTYwKytwbGVhc2UrYW5kK3RoYW5rK3lvdSUyMSUyMiUyQyUyMnZlcmJhdGltJTIyJTNBZmFsc2UlN0QlN0QlMkMlN0IlMjJ0eXBlJTIyJTNBJTIyYWN0aW9ucyUyMiUyQyUyMmJsb2NrX2lkJTIyJTNBJTIyQkxqelAlMjIlMkMlMjJlbGVtZW50cyUyMiUzQSU1QiU3QiUyMnR5cGUlMjIlM0ElMjJidXR0b24lMjIlMkMlMjJhY3Rpb25faWQlMjIlM0ElMjJBcHByb3ZlZCUyMiUyQyUyMnRleHQlMjIlM0ElN0IlMjJ0eXBlJTIyJTNBJTIycGxhaW5fdGV4dCUyMiUyQyUyMnRleHQlMjIlM0ElMjJBcHByb3ZlJTIyJTJDJTIyZW1vamklMjIlM0F0cnVlJTdEJTJDJTIyc3R5bGUlMjIlM0ElMjJwcmltYXJ5JTIyJTJDJTIydmFsdWUlMjIlM0ElMjIlN0IlNUMlMjJyZXF1ZXN0X2lkJTVDJTIyJTNBJTVDJTIyMDkzYjI0MjNlOGE2MzkwMThkNGI0ZmRhZDc3YWUyYWIwOTRlODQ1MjQ5MThjZTI5NjA3ZDg5ZGNjZTlmYjIxOCU1QyUyMiUyQyU1QyUyMmFjdGlvbiU1QyUyMiUzQSU1QyUyMkFwcHJvdmVkJTVDJTIyJTdEJTIyJTdEJTJDJTdCJTIydHlwZSUyMiUzQSUyMmJ1dHRvbiUyMiUyQyUyMmFjdGlvbl9pZCUyMiUzQSUyMkRlbmllZCUyMiUyQyUyMnRleHQlMjIlM0ElN0IlMjJ0eXBlJTIyJTNBJTIycGxhaW5fdGV4dCUyMiUyQyUyMnRleHQlMjIlM0ElMjJSZWplY3QlMjIlMkMlMjJlbW9qaSUyMiUzQXRydWUlN0QlMkMlMjJzdHlsZSUyMiUzQSUyMmRhbmdlciUyMiUyQyUyMnZhbHVlJTIyJTNBJTIyJTdCJTVDJTIycmVxdWVzdF9pZCU1QyUyMiUzQSU1QyUyMjA5M2IyNDIzZThhNjM5MDE4ZDRiNGZkYWQ3N2FlMmFiMDk0ZTg0NTI0OTE4Y2UyOTYwN2Q4OWRjY2U5ZmIyMTglNUMlMjIlMkMlNUMlMjJhY3Rpb24lNUMlMjIlM0ElNUMlMjJEZW5pZWQlNUMlMjIlN0QlMjIlN0QlNUQlN0QlNUQlN0QlMkMlMjJzdGF0ZSUyMiUzQSU3QiUyMnZhbHVlcyUyMiUzQSU3QiU3RCU3RCUyQyUyMnJlc3BvbnNlX3VybCUyMiUzQSUyMmh0dHBzJTNBJTVDJTJGJTVDJTJGaG9va3Muc2xhY2suY29tJTVDJTJGYWN0aW9ucyU1QyUyRlRNUzVGSDlEWSU1QyUyRjk0MzM2NjAzMDQ3MDklNUMlMkZmdTlXUDJvMGV0a2JkRDdRY2pQRXhYRGolMjIlMkMlMjJhY3Rpb25zJTIyJTNBJTVCJTdCJTIyYWN0aW9uX2lkJTIyJTNBJTIyQXBwcm92ZWQlMjIlMkMlMjJibG9ja19pZCUyMiUzQSUyMkJManpQJTIyJTJDJTIydGV4dCUyMiUzQSU3QiUyMnR5cGUlMjIlM0ElMjJwbGFpbl90ZXh0JTIyJTJDJTIydGV4dCUyMiUzQSUyMkFwcHJvdmUlMjIlMkMlMjJlbW9qaSUyMiUzQXRydWUlN0QlMkMlMjJ2YWx1ZSUyMiUzQSUyMiU3QiU1QyUyMnJlcXVlc3RfaWQlNUMlMjIlM0ElNUMlMjIwOTNiMjQyM2U4YTYzOTAxOGQ0YjRmZGFkNzdhZTJhYjA5NGU4NDUyNDkxOGNlMjk2MDdkODlkY2NlOWZiMjE4JTVDJTIyJTJDJTVDJTIyYWN0aW9uJTVDJTIyJTNBJTVDJTIyQXBwcm92ZWQlNUMlMjIlN0QlMjIlMkMlMjJzdHlsZSUyMiUzQSUyMnByaW1hcnklMjIlMkMlMjJ0eXBlJTIyJTNBJTIyYnV0dG9uJTIyJTJDJTIyYWN0aW9uX3RzJTIyJTNBJTIyMTc1NjU4ODU0MC44Mjk3OTglMjIlN0QlNUQlN0Q=",
+            "isBase64Encoded": True,
         },
         {},
     )

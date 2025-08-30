@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import requests
+
+from src.policy import ApprovalOutcome
 
 
 def _slack_api(
@@ -74,11 +77,6 @@ def post_message(
     thread_ts: str | None = None,
 ) -> bool:
     """Post a Block Kit message to a channel (with optional thread)."""
-    # data = post_message_with_response(
-    #     channel, text, token=token, blocks=blocks, thread_ts=thread_ts
-    # )
-    # return bool(data.get("ok"))
-    print(f"\n\nblocks: {blocks}\n\n{os.environ.get('SLACK_WEBHOOK_URL')}")
     payload = {"blocks": blocks}
     resp = requests.post(
         os.environ.get("SLACK_WEBHOOK_URL"),
@@ -86,7 +84,7 @@ def post_message(
         headers={"Content-Type": "application/json"},
         timeout=10,
     )
-    print(vars(resp))
+
     return bool(resp.status_code == 200)
 
 
@@ -113,7 +111,13 @@ def update_message(
         payload["text"] = text
     if blocks is not None:
         payload["blocks"] = blocks
+    payload["as_user"] = True
+    print(f"update_message payload {payload}")
     data = _slack_api("chat.update", bot_token, payload)
+    print(f"update_message data {data}")
+    if not data.get("ok"):
+        payload["thread_ts"] = ts
+        data = _slack_api("chat.postMessage", bot_token, payload)
     return bool(data.get("ok"))
 
 
@@ -153,14 +157,14 @@ def build_approval_blocks(
                     "type": "button",
                     "style": "primary",
                     "text": {"type": "plain_text", "text": "Approve"},
-                    "action_id": "approve",
+                    "action_id": ApprovalOutcome.ALLOW,
                     "value": approve_value,
                 },
                 {
                     "type": "button",
                     "style": "danger",
                     "text": {"type": "plain_text", "text": "Reject"},
-                    "action_id": "reject",
+                    "action_id": ApprovalOutcome.DENY,
                     "value": reject_value,
                 },
             ],
@@ -168,36 +172,82 @@ def build_approval_blocks(
     ]
 
 
-def build_blocks_from_text(
-    text: str,
-    *,
-    header: str | None = None,
-    context_kv: dict[str, str] | None = None,
+def _to_mrkdwn(md: str) -> str:
+    # headers -> bold line
+    md = re.sub(r"^\s*#{1,6}\s*(.+)$", r"*\1*", md, flags=re.MULTILINE)
+    # bold **x** -> *x*
+    # md = re.sub(r'\*\*(.+?)\*\*', r'*\1*', md)
+    # italics __x__ -> _x_
+    md = re.sub(r"__(.+?)__", r"_\1_", md)
+    # images ![alt](url) -> (move to image blocks separately; leave URL)
+    md = re.sub(r"!\[[^\]]*\]\(([^)]+)\)", r"\1", md)
+    # links [text](url) -> <url|text>
+    md = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", md)
+    # horizontal rules -> divider sentinel
+    md = re.sub(r"^\s*[-*_]{3,}\s*$", r"::DIVIDER::", md, flags=re.MULTILINE)
+    return md.strip()
+
+
+def extract_urls(text: str):
+    # Regex to match http, https, and www style URLs
+    url_pattern = re.compile(r"http[s]://[a-z|A-Z|0-9|.|/\-]+", re.IGNORECASE)
+    return url_pattern.findall(text)
+
+
+def get_header_and_context(
+    request_id: str, title: str
 ) -> list[dict[str, Any]]:
-    """Create blocks from plain or markdown text with optional header/context."""
-    # If text is a JSON string containing a 'blocks' or 'gif_url', prefer rich blocks
-    parsed_text, parsed_blocks = _extract_blocks_from_text_payload(text)
-    if parsed_blocks:
-        return parsed_blocks
-    blocks: list[dict[str, Any]] = []
-    if header:
-        blocks.append(
-            {"type": "header", "text": {"type": "plain_text", "text": header}}
-        )
-    if context_kv:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": f"*{k}:* {v}"}
-                    for k, v in context_kv.items()
-                ],
-            }
-        )
-    blocks.append(
-        {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+    return [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": title},
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Request ID:* `{str(request_id or '')}`",
+                }
+            ],
+        },
+    ]
+
+
+def build_blocks_from_text(
+    text: str, *, request_id: str | None
+) -> tuple[list[dict[str, Any]], int]:
+    """Craft Block Kit using mrkdwn sections with chunking and context.
+
+    Structure:
+    - Header: "Execution Result"
+    - Context: Request ID when available (mrkdwn)
+    - One or more section blocks with mrkdwn text (chunked)
+    """
+    # Header and context
+    blocks = get_header_and_context(request_id, "Execution Result")
+    char_count = 0
+    for img_url in extract_urls(text):
+        if img_url.endswith(".gif"):
+            blocks.append(
+                {"type": "image", "image_url": img_url, "alt_text": img_url}
+            )
+            return (
+                [blocks[i : i + 50] for i in range(0, len(blocks), 50)],
+                char_count,
+                [img_url],
+            )
+
+    for chunk in _to_mrkdwn(text).split("\n\n"):
+        blocks.append({"type": "divider"})
+        blocks.append({"type": "markdown", "text": chunk})
+        char_count += len(chunk)
+
+    return (
+        [blocks[i : i + 50] for i in range(0, len(blocks), 50)],
+        char_count,
+        extract_urls(text),
     )
-    return blocks
 
 
 def _extract_blocks_from_text_payload(

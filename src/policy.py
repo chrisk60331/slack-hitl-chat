@@ -52,9 +52,9 @@ class ApprovalCategory(str, Enum):
 class ApprovalOutcome(str, Enum):
     """Decision outcomes for proposed actions."""
 
-    ALLOW = "approve"
-    REQUIRE_APPROVAL = "require_approval"
-    DENY = "deny"
+    ALLOW: str = "Approved"
+    REQUIRE_APPROVAL: str = "Approval Required"
+    DENY: str = "Denied"
 
 
 class ProposedAction(BaseModel):
@@ -184,7 +184,8 @@ class PolicyEngine:
         """
 
         rules = self._load_rules().rules
-
+        print(f"rules {rules}\n\n")
+        print(f"action {action}\n\n")
         for rule in rules:
             if rule.matches(action):
                 if rule.deny:

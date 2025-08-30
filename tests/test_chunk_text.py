@@ -1,9 +1,8 @@
-from typing import List
 
 from src.completion_notifier import _chunk_text
 
 
-def collect_chunks(text: str, max_len: int) -> List[str]:
+def collect_chunks(text: str, max_len: int) -> list[str]:
     return list(_chunk_text(text, max_len))
 
 

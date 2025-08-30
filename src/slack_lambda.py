@@ -20,7 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from collections.abc import Iterable
+import re
 from typing import Any
 
 import boto3
@@ -28,12 +28,10 @@ import requests
 from slack_sdk import WebClient
 
 from src.approval_handler import (
-    _handle_new_approval_request,
     compute_request_id_from_action,
+    handle_new_approval_request,
 )
 from src.dynamodb_utils import get_approval_table
-from src.mcp_client import MCPClient
-from src.slack_blockkit import update_message
 from src.slack_helper import (
     build_thread_context,
     fetch_thread_messages,
@@ -86,84 +84,6 @@ def _slack_api(
         return resp.json()
     except Exception:
         return {"ok": False, "error": f"http_{resp.status_code}"}
-
-
-def _agentcore_stream(session_id: str, user_text: str) -> Iterable[str]:
-    """Invoke AgentCore Gateway (SSE) and yield token chunks.
-
-    Contract C:
-      1) POST /gateway/v1/sessions/{session_id}/messages -> {"message_id": "m-..."}
-      2) GET  /gateway/v1/sessions/{session_id}/stream?cursor=message_id (SSE)
-    """
-    base_url = os.environ.get("AGENTCORE_GATEWAY_URL", "")
-    if not base_url:
-        yield "AgentCore Gateway not configured."
-        return
-
-    # 1) create message
-    post_url = (
-        f"{base_url.rstrip('/')}/gateway/v1/sessions/{session_id}/messages"
-    )
-    post = requests.post(
-        post_url, json={"query": user_text, "user_id": "slack"}, timeout=30
-    )
-    if not post.ok:
-        yield f"AgentCore error: {post.status_code}"
-        return
-    message_id = (post.json() or {}).get("message_id", "")
-    if not message_id:
-        yield "AgentCore error: missing message_id"
-        return
-
-    # 2) stream SSE with simple retry on 404 in case of race/placement
-    base = base_url.rstrip("/")
-    stream_url = (
-        f"{base}/gateway/v1/sessions/{session_id}/stream?cursor={message_id}"
-    )
-
-    for attempt in range(2):
-        with requests.get(stream_url, stream=True, timeout=300) as resp:
-            if not resp.ok:
-                if resp.status_code == 404 and attempt == 0:
-                    # Best-effort fallback: create a new message cursor and stream again
-                    post_url = (
-                        f"{base}/gateway/v1/sessions/{session_id}/messages"
-                    )
-                    post = requests.post(
-                        post_url,
-                        json={"query": user_text, "user_id": "slack"},
-                        timeout=30,
-                    )
-                    if not post.ok:
-                        yield f"AgentCore stream error: {resp.status_code}"
-                        return
-                    message_id = (post.json() or {}).get("message_id", "")
-                    if not message_id:
-                        yield "AgentCore error: missing message_id"
-                        return
-                    stream_url = f"{base}/gateway/v1/sessions/{session_id}/stream?cursor={message_id}"
-                    continue
-                else:
-                    yield f"AgentCore stream error: {resp.status_code}"
-                    return
-            for line in resp.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                if not line.startswith("data: "):
-                    continue
-                data = line[len("data: ") :]
-                try:
-                    obj = json.loads(data)
-                except Exception:
-                    yield data
-                    continue
-                if obj.get("type") == "token":
-                    yield obj.get("text", "")
-                elif obj.get("type") in {"final", "end"}:
-                    if obj.get("text"):
-                        yield obj.get("text")
-                    return
-            return
 
 
 def oauth_redirect_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
@@ -246,7 +166,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     secrets = get_secret_json(secret_name) if secret_name else {}
     body = json.loads(raw_body.decode("utf-8") or "{}")
     user = body.get("event", {}).get("user", "")
-    print(f"user: {user}")
+
     # URL verification challenge
     if body.get("type") == "url_verification":
         print(
@@ -262,16 +182,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "body": body.get("challenge", ""),
         }
 
-    event_id = str(body.get("event_id") or "")
-    is_first_time = _should_process_event(event_id)
-    retry_num = (event.get("headers") or {}).get("X-Slack-Retry-Num")
-    if retry_num is not None and not is_first_time:
-        # Acknowledge duplicate without reprocessing
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"ok": True, "skipped": "retry_duplicate"}),
-        }
-
     # Only handle user-originated message or app_mention events
     event_obj = body.get("event") or {}
     channel_id = event_obj.get("channel", "")
@@ -283,9 +193,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         slack_userid_to_email(user, os.environ.get("SLACK_BOT_TOKEN", ""))
         or ""
     )
-    print(f"requester_email: {requester_email}")
-
-    # Lazy init approval table to avoid import-time AWS connections (eases tests)
     approval_table = get_approval_table()
     found = approval_table.get_item(Key={"request_id": request_id}).get("Item")
     if found and found.get("request_id") == request_id:
@@ -298,7 +205,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
     else:
         request_id = (
-            _handle_new_approval_request(
+            handle_new_approval_request(
                 {
                     "slack_channel": channel_id,
                     "slack_ts": thread_ts,
@@ -337,8 +244,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if event_type == "app_mention" and user_text:
         # Strip the mention prefix like "<@U12345> "
         try:
-            import re
-
             user_text = re.sub(r"^<@[^>]+>\\s*", "", user_text).strip()
         except Exception:
             pass
@@ -363,46 +268,16 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     else:
         session_id = f"session-{channel_id}-{thread_ts}"
 
-    # Post initial placeholder as a threaded reply to the user's message
-    # Always thread to the parent message timestamp (thread_ts or original ts)
-    initial_payload: dict[str, Any] = {
-        "channel": channel_id,
-        "text": "Received your message — preparing a response…",
-        "thread_ts": thread_ts,
-    }
-    try:
-        print(
-            {
-                "info": "slack_postMessage_attempt",
-                "channel": channel_id,
-                "has_thread": bool(event_obj.get("thread_ts")),
-            }
-        )
-    except Exception:
-        pass
-    # Build Slack thread context (fetch last messages and format a compact transcript)
-    try:
-        bot_user_id = get_bot_user_id(bot_token)
-        thread_messages = fetch_thread_messages(
-            channel_id, thread_ts, token=bot_token, max_messages=50
-        )
-        thread_context = build_thread_context(
-            thread_messages,
-            bot_user_id=bot_user_id,
-            max_turns=12,
-            max_chars=4000,
-        )
-    except Exception:
-        thread_context = ""
-
-    # Prepend thread context to the action text for downstream processing
-    if thread_context:
-        action_text = f"[Slack thread context]\n{thread_context}\n\nUser: {action_text}".strip()
-
-    # Always post initial message once
-    initial = _slack_api("chat.postMessage", bot_token, initial_payload)
-    # Use the ts of the newly posted message; fall back to parent thread_ts
-    ts = initial.get("ts") or thread_ts
+    bot_user_id = get_bot_user_id(bot_token)
+    thread_messages = fetch_thread_messages(
+        channel_id, thread_ts, token=bot_token, max_messages=50
+    )
+    thread_context = build_thread_context(
+        thread_messages,
+        bot_user_id=bot_user_id,
+        max_turns=12,
+        max_chars=4000,
+    )
 
     try:
         boto3.client(
@@ -414,19 +289,12 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 {
                     "proposed_action": action_text,
                     "slack_channel": channel_id,
-                    "slack_ts": ts,
+                    "slack_ts": thread_ts,
                     "request_id": request_id,
                     "requester": requester_email,
                     "thread_context": thread_context,
                 }
             ),
-        )
-
-        print(f"request_id {request_id}")
-        update_message(
-            channel_id,
-            ts,
-            text=f"Request {request_id} is being processed. Please wait...",
         )
 
     except Exception as e:
@@ -438,67 +306,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "statusCode": 200,
         "body": json.dumps({"ok": True, "mode": "async"}),
     }
-
-
-def _worker_stream_handler(event: dict[str, Any]) -> None:
-    """Background worker to stream AgentCore output back to Slack.
-
-    This is invoked asynchronously via Lambda self-invoke to avoid blocking
-    the Slack Events ack. It expects `channel_id`, `thread_ts`, `user_text`,
-    `session_id`, `message_ts`, and `secret_name`.
-    """
-    channel_id = str(event.get("channel_id", ""))
-    str(event.get("thread_ts", ""))
-    user_text = str(event.get("user_text", ""))
-    session_id = str(event.get("session_id", ""))
-    ts = event.get("message_ts")
-    secret_name = str(event.get("secret_name", ""))
-
-    secrets = get_secret_json(secret_name) if secret_name else {}
-    bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
-    if not bot_token:
-        return
-
-    accumulated = ""
-    accumulated_blocks = None
-
-    for chunk in _agentcore_stream(session_id, user_text):
-        if not chunk:
-            continue
-        try:
-            maybe_obj = json.loads(chunk)
-        except Exception:
-            maybe_obj = None
-
-        if isinstance(maybe_obj, dict):
-            if maybe_obj.get("type") == "token":
-                accumulated += str(maybe_obj.get("text", ""))
-            elif maybe_obj.get("type") == "final":
-                if maybe_obj.get("text"):
-                    accumulated = str(maybe_obj.get("text"))
-                # Check if the final response includes Slack blocks
-                if maybe_obj.get("blocks"):
-                    accumulated_blocks = maybe_obj.get("blocks")
-            # Check if any chunk includes Slack blocks (for MCP responses)
-            elif maybe_obj.get("blocks"):
-                accumulated_blocks = maybe_obj.get("blocks")
-        else:
-            accumulated += str(chunk)
-
-        if ts:
-            # Prepare the update payload
-            update_payload = {"channel": channel_id, "ts": ts}
-
-            # If we have blocks, use them for rich formatting
-            if accumulated_blocks:
-                update_payload["blocks"] = accumulated_blocks
-                # Also include text as fallback
-                update_payload["text"] = accumulated
-            else:
-                # Fallback to text-only
-                update_payload["text"] = accumulated
-
-            _slack_api("chat.update", bot_token, update_payload)
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -518,18 +325,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if method == "POST" and raw_path.endswith("/events"):
         return events_handler(event, context)
     # Async worker entry (internal)
-    if (event.get("worker") is True) or (
-        method == "POST" and raw_path.endswith("/events/worker")
-    ):
-        try:
-            _worker_stream_handler(
-                event.get("body")
-                if raw_path.endswith("/events/worker")
-                else event
-            )
-        except Exception:
-            pass
-        return {"statusCode": 200, "body": json.dumps({"ok": True})}
 
     return {
         "statusCode": 404,
@@ -537,16 +332,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             {"error": "not found", "path": raw_path, "method": method}
         ),
     }
-
-
-async def invoke_mcp_client(action_text: str):
-    client = MCPClient()
-    try:
-        await client.connect_to_server("google_mcp/google_admin/mcp_server.py")
-        result = await client.process_query(action_text)
-    finally:
-        await client.cleanup()
-    return result
 
 
 if __name__ == "__main__":

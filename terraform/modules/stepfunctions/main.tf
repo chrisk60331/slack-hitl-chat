@@ -49,12 +49,12 @@ resource "aws_sfn_state_machine" "agentcore_hitl_workflow" {
         Choices = [
           {
             Variable      = "$.body.status"
-            StringEquals  = "approve"
+            StringEquals  = "Approved"
             Next          = "ApprovalGranted"
           },
           {
             Variable      = "$.body.status"
-            StringEquals  = "reject"
+            StringEquals  = "Denied"
             Next          = "ApprovalRejected"
           },
           {

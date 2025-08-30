@@ -20,86 +20,11 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable
 from typing import Any
-from pprint import pprint
 
 import src.slack_blockkit as slack_blockkit
 from src.dynamodb_utils import get_approval_table
-
-MAX_BLOCKS = 50
-MAX_SECTION_CHARS = 2900  # safety < 3000
-MAX_MESSAGE_CHARS = 3000  # hard per-response character target
-
-import re
-
-def _to_mrkdwn(md: str) -> str:
-    # headers -> bold line
-    md = re.sub(r'^\s*#{1,6}\s*(.+)$', r'*\1*', md, flags=re.MULTILINE)
-    # bold **x** -> *x*
-    # md = re.sub(r'\*\*(.+?)\*\*', r'*\1*', md)
-    # italics __x__ -> _x_
-    md = re.sub(r'__(.+?)__', r'_\1_', md)
-    # images ![alt](url) -> (move to image blocks separately; leave URL)
-    md = re.sub(r'!\[[^\]]*\]\(([^)]+)\)', r'\1', md)
-    # links [text](url) -> <url|text>
-    md = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<\2|\1>', md)
-    # horizontal rules -> divider sentinel
-    md = re.sub(r'^\s*[-*_]{3,}\s*$', r'::DIVIDER::', md, flags=re.MULTILINE)
-    return md.strip()
-
-
-def extract_urls(text: str):
-    # Regex to match http, https, and www style URLs
-    url_pattern = re.compile(
-        r'http[s]://[a-z|A-Z|0-9|.|/\-]+',
-        re.IGNORECASE
-    )
-    return url_pattern.findall(text)
-
-def _build_blocks_from_text(
-    text: str, *, request_id: str | None
-) -> tuple[list[dict[str, Any]], int]:
-    """Craft Block Kit using mrkdwn sections with chunking and context.
-
-    Structure:
-    - Header: "Execution Result"
-    - Context: Request ID when available (mrkdwn)
-    - One or more section blocks with mrkdwn text (chunked)
-    """
-    # Header and context
-    blocks: list[dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "Execution Result"},
-        },
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"*Request ID:* `{str(request_id or '')}`",
-                }
-            ],
-        },
-    ]
-    char_count = 0
-    for img_url in extract_urls(text):
-        if img_url.endswith(".gif"):
-            blocks.append(
-                {"type": "image", "image_url": img_url, "alt_text": img_url}
-            )
-            return [blocks[i:i + 50] for i in range(0, len(blocks), 50)], char_count, [img_url]
-    
-    for chunk in _to_mrkdwn(text).split("\n\n"):
-        blocks.append({"type": "divider"})
-        blocks.append(
-            {"type": "markdown", "text": chunk}
-        )
-        char_count += len(chunk)
-
-    return [blocks[i:i + 50] for i in range(0, len(blocks), 50)], char_count, extract_urls(text)
-
+from src.slack_blockkit import build_blocks_from_text
 
 
 def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
@@ -162,7 +87,9 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
             "body": {"ok": False, "skipped": "no_token"},
         }
 
-    pages, char_count, urls = _build_blocks_from_text(result_obj, request_id=request_id)
+    pages, char_count, urls = build_blocks_from_text(
+        result_obj, request_id=request_id
+    )
     print(f"blocks: {json.dumps(pages, indent=4)}")
 
     # Post each page as a threaded reply
@@ -191,6 +118,6 @@ if __name__ == "__main__":
     event = {
         "message": "Request has been approved",
         "status": "approved",
-        "request_id": "2e010c54538c1d7147dbfaf5841260d0356fabcab35623358eacc2a0f56bf31b",
+        "request_id": "636c23289f6159a696adc982a2d8c52387fae5cec28b742e2d996840da779806",
     }
     print(lambda_handler(event, {}))
