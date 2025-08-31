@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>MCP Servers</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background: #f6f6f6; text-align: left; }
+      .actions { margin-top: 1rem; }
+      input[type=text] { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h1>MCP Servers</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul>
+          {% for category, message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <form method="post">
+      <table>
+        <thead>
+          <tr><th>Alias</th><th>Path</th><th>Enabled</th><th>Disabled tools (comma-separated)</th></tr>
+        </thead>
+        <tbody id="rows">
+          {% for s in servers %}
+          <tr>
+            <td><input type="text" name="alias" value="{{ s.alias }}"/></td>
+            <td><input type="text" name="path" value="{{ s.path }}"/></td>
+            <td><input type="checkbox" name="enabled_{{ loop.index0 }}" {% if s.enabled %}checked{% endif %}/></td>
+            <td><input type="text" name="disabled_tools" value="{{ s.disabled_tools | join(', ') }}" placeholder="e.g. delete_user, remove_role"/></td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td><input type="text" name="alias" placeholder="alias"/></td>
+            <td><input type="text" name="path" placeholder="/path/to/server.py"/></td>
+            <td><input type="checkbox" name="enabled_{{ servers|length }}"/></td>
+            <td><input type="text" name="disabled_tools" placeholder="e.g. delete_user, remove_role"/></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="actions">
+        <button type="submit">Save</button>
+        <a href="/">Back</a>
+      </div>
+    </form>
+  </body>
+  </html>
+
+

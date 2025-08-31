@@ -156,6 +156,7 @@ output "environment_variables" {
   description = "Environment variables for the AgentCore application"
   value = {
     TABLE_NAME         = module.dynamodb.approval_log_table_name
+    CONFIG_TABLE_NAME  = module.dynamodb.config_table_name
     AWS_REGION         = var.aws_region
     STEPFUNCTIONS_ARN  = module.stepfunctions.step_functions_arn
     SNS_TOPIC_ARN      = module.approval_lambda.sns_topic_arn

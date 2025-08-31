@@ -16,6 +16,8 @@ from botocore.config import Config as BotoConfig
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from .config_store import get_mcp_servers
+
 # load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
 MAX_TOKENS = 4095
@@ -33,6 +35,37 @@ try:
 except FileNotFoundError:
     # Fallback to an empty prompt if the file is missing to avoid crashes
     SYSTEM_PROMPT = ""
+    raise ValueError("SYSTEM_PROMPT_PATH not found")
+
+
+async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
+    client = MCPClient()
+    try:
+        alias_to_path: dict[str, str] = {}
+        # Prefer config DB MCP servers
+        try:
+            servers_cfg = get_mcp_servers().servers
+            disabled_map: dict[str, list[str]] = {}
+            for s in servers_cfg:
+                if s.enabled:
+                    alias_to_path[s.alias] = s.path
+                    if getattr(s, "disabled_tools", None):
+                        disabled_map[s.alias] = list(s.disabled_tools)
+            if disabled_map:
+                client.set_disabled_tools_map(disabled_map)
+        except Exception as e:
+            logging.error(f"Error getting MCP servers: {e}")
+
+        if alias_to_path:
+            await client.connect_to_servers(alias_to_path, requester_email)
+
+        response_text = await client.process_query(
+            query, requester_email
+        )
+    finally:
+        await client.cleanup()
+
+    return response_text
 
 
 class MCPClient:
@@ -60,6 +93,28 @@ class MCPClient:
         # Multi-server support
         self.sessions: dict[str, ClientSession] = {}
         self.tool_registry: dict[str, tuple[str, str]] = {}
+        # Per-alias set of disabled tool short-names (no alias prefix)
+        self.disabled_tools_by_alias: dict[str, set[str]] = {}
+
+    def set_disabled_tools_map(
+        self, mapping: dict[str, list[str]] | dict[str, set[str]]
+    ) -> None:
+        """Set per-alias disabled tool names.
+
+        Args:
+            mapping: Dict of alias -> iterable of tool short-names to disable.
+        """
+        normalized: dict[str, set[str]] = {}
+        for alias, names in mapping.items():
+            disabled_set = set(names)
+            # Normalize to bare short names (defensive if fully-qualified used)
+            normalized[alias] = {n.split("__", 1)[-1] for n in disabled_set}
+        self.disabled_tools_by_alias = normalized
+
+    def is_tool_allowed(self, alias: str, short_name: str) -> bool:
+        """Return True if the tool is not disabled for the given alias."""
+        disabled = self.disabled_tools_by_alias.get(alias, set())
+        return short_name not in disabled
 
     def _is_retryable_bedrock_error(self, exc: Exception) -> bool:
         """Return True if the exception is a transient/retryable Bedrock
@@ -344,9 +399,12 @@ class MCPClient:
             for alias, session in self.sessions.items():
                 tools_resp = await session.list_tools()
                 for tool in tools_resp.tools:
+                    short_name = tool.name
+                    if not self.is_tool_allowed(alias, short_name):
+                        continue
                     available_tools.append(
                         {
-                            "name": f"{alias}__{tool.name}",
+                            "name": f"{alias}__{short_name}",
                             "description": tool.description,
                             "input_schema": tool.inputSchema,
                         }
@@ -434,6 +492,10 @@ class MCPClient:
                         if target_session is None:
                             raise ValueError(
                                 f"No MCP session for alias {alias}"
+                            )
+                        if not self.is_tool_allowed(alias, short_name):
+                            raise ValueError(
+                                f"Tool '{short_name}' is disabled for alias '{alias}'"
                             )
                         result = await target_session.call_tool(
                             short_name, tool_args
@@ -566,9 +628,12 @@ class MCPClient:
             for alias, session in self.sessions.items():
                 tools_resp = await session.list_tools()  # type: ignore[func-returns-value]
                 for t in tools_resp.tools:
+                    short_name = t.name
+                    if not self.is_tool_allowed(alias, short_name):
+                        continue
                     available_tools.append(
                         {
-                            "name": f"{alias}__{t.name}",
+                            "name": f"{alias}__{short_name}",
                             "description": t.description,
                             "input_schema": t.inputSchema,
                         }
@@ -693,6 +758,10 @@ class MCPClient:
                             if target_session is None:
                                 raise ValueError(
                                     f"No MCP session for alias {alias}"
+                                )
+                            if not self.is_tool_allowed(alias, short_name):
+                                raise ValueError(
+                                    f"Tool '{short_name}' is disabled for alias '{alias}'"
                                 )
                             result = await target_session.call_tool(
                                 short_name, call["args"]

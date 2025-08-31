@@ -31,7 +31,7 @@ class ApprovalCategory(str, Enum):
 
     USER_ACCOUNT_ACCESS = "user_account_access"
     AWS_ROLE_ACCESS = "aws_role_access"
-    DOCUMENT_ACCESS_UPDATES = "non_sow_document_access"
+    DOCUMENT_ACCESS_UPDATES = "document_access_updates"
     DOCUMENT_CONTENT_UPDATES = "document_content_updates"
     OTHER = "other"
 
@@ -148,11 +148,6 @@ DEFAULT_RULES: list[PolicyRule] = [
         categories=[ApprovalCategory.DOCUMENT_ACCESS_UPDATES],
         require_approval=True,
     ),
-    PolicyRule(
-        name="require_approval_for_document_edits_and_deletes",
-        categories=[ApprovalCategory.DOCUMENT_CONTENT_UPDATES],
-        require_approval=True,
-    ),
 ]
 
 
@@ -162,11 +157,16 @@ class PolicyEngine:
     Loads rules from POLICY_PATH if provided; otherwise uses DEFAULT_RULES.
     """
 
-    def __init__(self, policy_path: str | None = None) -> None:
+    def __init__(
+        self, policy_path: str | None = None, rules: list[PolicyRule] | None = None
+    ) -> None:
         self._policy_path = policy_path or os.getenv("POLICY_PATH")
+        self._custom_rules = rules
 
     @lru_cache(maxsize=1)
     def _load_rules(self) -> _RawPolicy:
+        if self._custom_rules is not None:
+            return _RawPolicy(rules=list(self._custom_rules))
         if self._policy_path and os.path.exists(self._policy_path):
             with open(self._policy_path, encoding="utf-8") as f:
                 data = json.load(f)

@@ -18,7 +18,7 @@ import boto3
 from pydantic import BaseModel, Field
 
 from .approval_handler import ApprovalItem, get_approval_status
-from .mcp_client import MCPClient
+from .mcp_client import invoke_mcp_client
 from .memory import ShortTermMemory
 from .policy import (
     ApprovalCategory,
@@ -28,6 +28,7 @@ from .policy import (
     ProposedAction,
     infer_category_and_resource,
 )
+from .config_store import get_policies, get_mcp_servers
 
 
 class OrchestratorRequest(BaseModel):
@@ -68,7 +69,16 @@ class AgentOrchestrator:
         policy_engine: PolicyEngine | None = None,
     ) -> None:
         self.memory = memory or ShortTermMemory()
-        self.policy_engine = policy_engine or PolicyEngine()
+        # Load rules from config DB when available; fall back to default
+        if policy_engine is not None:
+            self.policy_engine = policy_engine
+        else:
+            try:
+                cfg = get_policies()
+                rules = cfg.rules if cfg.rules else None
+            except Exception:
+                rules = None
+            self.policy_engine = PolicyEngine(rules=rules)
         self._sfn_client = boto3.client(
             "stepfunctions", region_name=os.getenv("AWS_REGION")
         )
@@ -154,31 +164,7 @@ class AgentOrchestrator:
             else request.query
         )
 
-        client = MCPClient()
-        try:
-            servers_env = os.getenv("MCP_SERVERS", "").strip()
-            if servers_env:
-                # Auto-connect handled in process_query, but we connect
-                # explicitly to fail fast on misconfig
-                alias_to_path = {}
-                for part in servers_env.split(";"):
-                    if not part or "=" not in part:
-                        continue
-                    alias, path = part.split("=", 1)
-                    alias_to_path[alias.strip()] = path.strip()
-                if alias_to_path:
-                    await client.connect_to_servers(
-                        alias_to_path, request.user_id
-                    )
-            else:
-                await client.connect_to_server(
-                    "google_mcp/google_admin/mcp_server.py"
-                )
-            response_text = await client.process_query(
-                full_query, request.user_id
-            )
-        finally:
-            await client.cleanup()
+        response_text = await invoke_mcp_client(full_query, request.user_id)
 
         self.memory.append("user", request.query)
         self.memory.append("assistant", response_text)

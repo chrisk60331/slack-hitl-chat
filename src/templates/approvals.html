@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>Approvals Audit</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      .table-wrap { width: 100%; overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
+      th { background: #f6f6f6; text-align: left; }
+      code { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    </style>
+  </head>
+  <body>
+    <h1>Approvals Audit</h1>
+    <p><a href="/">Back</a></p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Request ID</th>
+          <th>Status</th>
+          <th>Timestamp</th>
+          <th>proposed_action</th>
+          <th>completion_message</th>
+          <th>approver</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><code>{{ item.request_id }}</code></td>
+          <td>{{ item.approval_status }}</td>
+          <td>{{ item.timestamp }}</td>
+          <td>{{ item.proposed_action }}</td>
+          <td>{{ item.completion_message }}</td>
+          <td>{{ item.approver }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </body>
+  </html>
+
+
