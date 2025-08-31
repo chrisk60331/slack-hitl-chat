@@ -13,6 +13,13 @@ from .orchestrator import (
     OrchestratorRequest,
     OrchestratorResult,
 )
+from .config_store import (
+    MCPServer,
+    put_mcp_servers,
+    put_policies,
+)
+from .policy import DEFAULT_RULES, PolicyRule
+from .mcp_client import MCPClient
 
 load_dotenv()
 
@@ -92,6 +99,62 @@ def run_cmd(
             click.echo(formatted_output)
 
     asyncio.run(_run())
+
+
+@cli.command("migrate-config")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be migrated without writing to DynamoDB",
+)
+@click.option(
+    "--include",
+    type=click.Choice(["policies", "servers", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Select which config to migrate",
+)
+def migrate_config_cmd(dry_run: bool, include: str) -> None:
+    """Migrate policies from policy.py and MCP servers from .env to config table.
+
+    - Policies are sourced from src.policy.DEFAULT_RULES
+    - MCP servers are parsed from MCP_SERVERS env (e.g., "google=/path;a=/p")
+    - Writes to the DynamoDB table in CONFIG_TABLE_NAME
+    """
+
+    load_dotenv()
+
+    to_migrate_policies = include in ("policies", "all")
+    to_migrate_servers = include in ("servers", "all")
+
+    migrated_any = False
+
+    if to_migrate_policies:
+        rules: list[PolicyRule] = list(DEFAULT_RULES)
+        click.echo(f"Found {len(rules)} policy rule(s) to migrate")
+        if not dry_run:
+            put_policies(rules)
+            migrated_any = True
+            click.echo("Policies migrated to config table")
+
+    if to_migrate_servers:
+        servers_env = os.getenv("MCP_SERVERS", "").strip()
+        mapping = MCPClient._parse_servers_env(servers_env)  # type: ignore[attr-defined]
+        servers = [
+            MCPServer(alias=alias, path=path, enabled=True)
+            for alias, path in mapping.items()
+        ]
+        click.echo(f"Found {len(servers)} MCP server(s) to migrate")
+        if not dry_run:
+            put_mcp_servers(servers)
+            migrated_any = True
+            click.echo("MCP servers migrated to config table")
+
+    if dry_run and (to_migrate_policies or to_migrate_servers):
+        click.echo("Dry run complete (no writes performed)")
+
+    if not migrated_any and not dry_run:
+        click.echo("Nothing migrated. Check --include selection or source data.")
 
 
 if __name__ == "__main__":

@@ -124,3 +124,28 @@ resource "aws_dynamodb_table" "slack_sessions" {
     Purpose = "Slack thread to AgentCore session mapping"
   })
 }
+
+# DynamoDB Table for configuration (MCP servers, policies, etc.)
+resource "aws_dynamodb_table" "agentcore_config" {
+  name         = "${var.name_prefix}-config"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "config_key"
+
+  attribute {
+    name = "config_key"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = merge(var.tags, {
+    Name    = "${var.name_prefix}-config"
+    Purpose = "Configuration for MCP servers and policy rules"
+  })
+}

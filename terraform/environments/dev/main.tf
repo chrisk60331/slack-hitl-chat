@@ -220,6 +220,7 @@ module "api_lambda" {
   
   environment_variables = {
     TABLE_NAME = module.dynamodb.approval_log_table_name
+    CONFIG_TABLE_NAME  = module.dynamodb.config_table_name
     SLACK_WEBHOOK_URL  = var.slack_webhook_url
     APPROVAL_LAMBDA_FUNCTION_NAME = module.approval_lambda.lambda_function_name
     SLACK_BOT_TOKEN = var.slack_bot_token
@@ -256,6 +257,14 @@ resource "aws_apigatewayv2_integration" "api_stream" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "api_sns_webhook" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "api_sessions" {
   api_id    = aws_apigatewayv2_api.agentcore_api.id
   route_key = "POST /gateway/v1/sessions"
@@ -272,6 +281,12 @@ resource "aws_apigatewayv2_route" "api_stream" {
   api_id    = aws_apigatewayv2_api.agentcore_api.id
   route_key = "GET /gateway/v1/sessions/{session_id}/stream"
   target    = "integrations/${aws_apigatewayv2_integration.api_stream.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_sns_webhook" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "POST /webhooks/sns"
+  target    = "integrations/${aws_apigatewayv2_integration.api_sns_webhook.id}"
 }
 
 resource "aws_lambda_permission" "apigw_invoke_api" {

@@ -31,7 +31,7 @@ class ApprovalCategory(str, Enum):
 
     USER_ACCOUNT_ACCESS = "user_account_access"
     AWS_ROLE_ACCESS = "aws_role_access"
-    DOCUMENT_ACCESS_UPDATES = "non_sow_document_access"
+    DOCUMENT_ACCESS_UPDATES = "document_access_updates"
     DOCUMENT_CONTENT_UPDATES = "document_content_updates"
     OTHER = "other"
 
@@ -146,11 +146,6 @@ DEFAULT_RULES: list[PolicyRule] = [
     PolicyRule(
         name="require_approval_for_document_access_updates",
         categories=[ApprovalCategory.DOCUMENT_ACCESS_UPDATES],
-        require_approval=True,
-    ),
-    PolicyRule(
-        name="require_approval_for_document_edits_and_deletes",
-        categories=[ApprovalCategory.DOCUMENT_CONTENT_UPDATES],
         require_approval=True,
     ),
 ]

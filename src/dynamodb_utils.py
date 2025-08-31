@@ -20,22 +20,23 @@ def get_dynamodb_resource() -> Any:
 
     Honors LOCAL_DEV setup to support local DynamoDB containers.
     """
-    if os.getenv("LOCAL_DEV", "false").lower() == "true":
-        params: dict[str, Any] = {
-            "endpoint_url": os.environ.get(
-                "DYNAMODB_LOCAL_ENDPOINT",
-                "http://agentcore-dynamodb-local:8000",
-            ),
-            "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", "test"),
-            "aws_secret_access_key": os.environ.get(
-                "AWS_SECRET_ACCESS_KEY", "test"
-            ),
-        }
-    else:
-        params = {}
+    # if os.getenv("LOCAL_DEV", "false").lower() == "true":
+    #     params: dict[str, Any] = {
+    #         "endpoint_url": os.environ.get(
+    #             "DYNAMODB_LOCAL_ENDPOINT",
+    #             "http://localhost:8000",
+    #         ),
+    #         "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+    #         "aws_secret_access_key": os.environ.get(
+    #             "AWS_SECRET_ACCESS_KEY", "test"
+    #         ),
+    #     }
+    # else:
+    print(boto3.client("dynamodb",region_name="us-west-2").list_tables())
+    params = {}
     return boto3.resource(
         "dynamodb",
-        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        region_name="us-west-2",
         **params,
     )
 

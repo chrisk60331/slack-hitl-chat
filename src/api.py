@@ -16,6 +16,16 @@ from pydantic import BaseModel
 
 from .mcp_client import MCPClient
 from .orchestrator import AgentOrchestrator, OrchestratorRequest
+from .config_store import (
+    MCPServer,
+    MCPServersConfig,
+    PoliciesConfig,
+    get_mcp_servers,
+    put_mcp_servers,
+    get_policies,
+    put_policies,
+)
+from .dynamodb_utils import get_approval_table
 
 app = FastAPI(title="AgentCore Orchestrator API")
 _orchestrator = AgentOrchestrator()
@@ -31,6 +41,80 @@ class RunPayload(BaseModel):
     resource: str | None = None
     amount: float | None = None
     environment: str | None = None
+
+
+# --- Config: MCP servers ---
+
+
+@app.get("/config/mcp-servers", response_model=MCPServersConfig)
+async def list_mcp_servers() -> dict[str, list[dict[str, Any]]]:
+    cfg = get_mcp_servers()
+    return {"servers": [s.model_dump() for s in cfg.servers]}
+
+
+class PutServersPayload(BaseModel):
+    servers: list[MCPServer]
+
+
+@app.put("/config/mcp-servers", response_model=MCPServersConfig)
+async def replace_mcp_servers(payload: PutServersPayload) -> dict[str, list[dict[str, Any]]]:
+    put_mcp_servers(payload.servers)
+    return {"servers": [s.model_dump() for s in payload.servers]}
+
+
+# --- Config: Policies ---
+
+
+@app.get("/config/policies", response_model=PoliciesConfig)
+async def get_policy_rules() -> dict[str, list[dict[str, Any]]]:
+    cfg = get_policies()
+    return {"rules": [r.model_dump() for r in cfg.rules]}
+
+
+class PutPoliciesPayload(BaseModel):
+    rules: list[dict[str, Any]]
+
+
+@app.put("/config/policies", response_model=PoliciesConfig)
+async def put_policy_rules(payload: PutPoliciesPayload) -> dict[str, list[dict[str, Any]]]:
+    rules = [
+        # validate using PolicyRule model by round-tripping through PoliciesConfig
+        # but here directly construct is fine
+        # PolicyRule(**r)
+        r
+        for r in payload.rules
+    ]
+    # Convert to PolicyRule for storage validation
+    from .policy import PolicyRule
+
+    validated = [PolicyRule(**r) for r in rules]
+    put_policies(validated)
+    return {"rules": [r.model_dump() for r in validated]}
+
+
+# --- Approvals Audit (read-only) ---
+
+
+@app.get("/audit/approvals")
+async def list_approvals(limit: int = 50) -> dict[str, list[dict[str, Any]]]:
+    """Return recent approvals from DynamoDB (StatusIndex by timestamp)."""
+    table = get_approval_table()
+    
+    # Fallback to scan if GSI names differ; use conservative limit
+    try:
+        resp = table.query(
+            IndexName="TimestampIndex",
+            KeyConditionExpression="#ts >= :min",
+            ExpressionAttributeNames={"#ts": "timestamp"},
+            ExpressionAttributeValues={":min": ""},
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        items = resp.get("Items", [])
+    except Exception:
+        resp = table.scan(Limit=limit)
+        items = resp.get("Items", [])
+    return {"items": items}
 
 
 @app.post("/agent/run")
