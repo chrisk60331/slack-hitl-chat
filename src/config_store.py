@@ -52,6 +52,8 @@ class MCPServer(BaseModel):
     alias: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
     enabled: bool = True
+    # Optional list of tool short-names that should be disabled for this server
+    disabled_tools: list[str] = Field(default_factory=list)
 
 
 class MCPServersConfig(BaseModel):

@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.approval_handler import COMPLETION_STATUS, get_approval_status
-from src.mcp_client import MCPClient
+from src.mcp_client import invoke_mcp_client
 from src.policy import ApprovalOutcome
 
 logger = logging.getLogger(__name__)
@@ -63,33 +63,6 @@ class ExecutionResult(BaseModel):
     execution_time: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat()
     )
-
-
-async def invoke_mcp_client(action_text: str, requester_email: str = None):
-    client = MCPClient()
-    try:
-        # Prefer multi-server configuration when provided
-        servers_env = os.getenv("MCP_SERVERS", "").strip()
-        if servers_env:
-            alias_to_path: dict[str, str] = {}
-            for part in servers_env.split(";"):
-                logger.error(
-                    f"part: {part} requester_email: {requester_email}"
-                )
-                if not part or "=" not in part:
-                    continue
-                alias, path = part.split("=", 1)
-                alias_to_path[alias.strip()] = path.strip()
-            if alias_to_path:
-                await client.connect_to_servers(alias_to_path, requester_email)
-        else:
-            await client.connect_to_server(
-                "google_mcp/google_admin/mcp_server.py", requester_email
-            )
-        result = await client.process_query(action_text, requester_email)
-    finally:
-        await client.cleanup()
-    return result
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

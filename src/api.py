@@ -11,6 +11,7 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -31,6 +32,15 @@ app = FastAPI(title="AgentCore Orchestrator API")
 _orchestrator = AgentOrchestrator()
 _sessions: dict[str, dict[str, Any]] = {}
 logger = logging.getLogger(__name__)
+# Mount Flask Admin UI under /admin
+try:
+    from .flask_ui import create_app as _create_flask_app
+
+    _flask_app = _create_flask_app()
+    app.mount("/admin", WSGIMiddleware(_flask_app))
+except Exception:
+    # If Flask or UI is unavailable, continue without mounting (non-fatal)
+    pass
 
 
 class RunPayload(BaseModel):

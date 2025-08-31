@@ -157,11 +157,16 @@ class PolicyEngine:
     Loads rules from POLICY_PATH if provided; otherwise uses DEFAULT_RULES.
     """
 
-    def __init__(self, policy_path: str | None = None) -> None:
+    def __init__(
+        self, policy_path: str | None = None, rules: list[PolicyRule] | None = None
+    ) -> None:
         self._policy_path = policy_path or os.getenv("POLICY_PATH")
+        self._custom_rules = rules
 
     @lru_cache(maxsize=1)
     def _load_rules(self) -> _RawPolicy:
+        if self._custom_rules is not None:
+            return _RawPolicy(rules=list(self._custom_rules))
         if self._policy_path and os.path.exists(self._policy_path):
             with open(self._policy_path, encoding="utf-8") as f:
                 data = json.load(f)

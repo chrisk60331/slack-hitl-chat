@@ -140,7 +140,7 @@ class BulkIssueUploadRequest(BaseModel):
         default=None, description="S3 URL (not supported in this server)"
     )
     dryRun: bool = Field(
-        default=False,
+        default=True,
         description="If true, validate only and don't create issues",
     )
     batchSize: int = Field(default=50, description="Bulk API batch size")

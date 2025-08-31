@@ -32,7 +32,6 @@ def get_dynamodb_resource() -> Any:
     #         ),
     #     }
     # else:
-    print(boto3.client("dynamodb",region_name="us-west-2").list_tables())
     params = {}
     return boto3.resource(
         "dynamodb",

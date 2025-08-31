@@ -48,7 +48,6 @@ mcp = FastMCP(
 
 # Initialize service
 drive_service = GoogleDriveService(requester_email=sys.argv[1])
-logging.error(f"sys args: {sys.argv}")
 
 
 @mcp.tool(
@@ -213,8 +212,6 @@ def list_drives(request: ListDrivesRequest) -> dict:
     Returns:
         dict: List of shared drives with metadata.
     """
-    logging.error(f"list_drives request: {request}")
-
     return drive_service.list_drives(request)
 
 

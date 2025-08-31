@@ -265,6 +265,23 @@ resource "aws_apigatewayv2_integration" "api_sns_webhook" {
   payload_format_version = "2.0"
 }
 
+# Generic integrations for admin/docs GET/POST
+resource "aws_apigatewayv2_integration" "api_generic_get" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "GET"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "api_generic_post" {
+  api_id                 = aws_apigatewayv2_api.agentcore_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_lambda.lambda_function_arn
+  integration_method     = "POST"
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "api_sessions" {
   api_id    = aws_apigatewayv2_api.agentcore_api.id
   route_key = "POST /gateway/v1/sessions"
@@ -287,6 +304,60 @@ resource "aws_apigatewayv2_route" "api_sns_webhook" {
   api_id    = aws_apigatewayv2_api.agentcore_api.id
   route_key = "POST /webhooks/sns"
   target    = "integrations/${aws_apigatewayv2_integration.api_sns_webhook.id}"
+}
+
+# Admin UI routes (Flask mounted under /admin)
+resource "aws_apigatewayv2_route" "api_admin_root_get" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /admin"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
+  authorization_type = "AWS_IAM"
+}
+
+resource "aws_apigatewayv2_route" "api_admin_root_post" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "POST /admin"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_post.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_admin_proxy_get" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /admin/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
+  authorization_type = "AWS_IAM"
+}
+
+resource "aws_apigatewayv2_route" "api_admin_proxy_post" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "POST /admin/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_post.id}"
+}
+
+# FastAPI docs & openapi
+resource "aws_apigatewayv2_route" "api_docs" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /docs"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
+  authorization_type = "AWS_IAM"
+}
+
+resource "aws_apigatewayv2_route" "api_docs_proxy" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /docs/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
+  authorization_type = "AWS_IAM"
+}
+
+resource "aws_apigatewayv2_route" "api_openapi" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /openapi.json"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_redoc" {
+  api_id    = aws_apigatewayv2_api.agentcore_api.id
+  route_key = "GET /redoc"
+  target    = "integrations/${aws_apigatewayv2_integration.api_generic_get.id}"
 }
 
 resource "aws_lambda_permission" "apigw_invoke_api" {

@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>Policies</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background: #f6f6f6; text-align: left; }
+      input[type=text] { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h1>Policies</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul>
+          {% for category, message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <form method="post">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Categories (comma sep)</th>
+       
+            <th>Require Approval</th>
+            <th>Deny</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rules %}
+          <tr>
+            <td><input type="text" name="name" value="{{ r.name }}"/></td>
+            <td><input type="text" name="categories" value="{{ ','.join(r.categories) }}"/></td>
+            <td><input type="checkbox" name="require_approval_{{ loop.index0 }}" {% if r.require_approval %}checked{% endif %}/></td>
+            <td><input type="checkbox" name="deny_{{ loop.index0 }}" {% if r.deny %}checked{% endif %}/></td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td><input type="text" name="name" placeholder="rule name"/></td>
+            <td><input type="text" name="categories" placeholder="aws_role_access,..."/></td>
+            <td><input type="checkbox" name="require_approval_{{ rules|length }}"/></td>
+            <td><input type="checkbox" name="deny_{{ rules|length }}"/></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="actions">
+        <button type="submit">Save</button>
+        <a href="/">Back</a>
+      </div>
+    </form>
+  </body>
+  </html>
+
+
