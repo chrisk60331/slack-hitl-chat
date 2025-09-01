@@ -1,5 +1,18 @@
 ## AgentCore Marketplace
 
+### Features
+
+-FastAPI gateway + Flask Admin UI: /admin, health, config, Slack interactivity, SSE streaming.
+- Click CLI: run orchestrations; migrate-config to DynamoDB.
+- Slack integration: Events API, signature verification, thread context, async via Step Functions.
+- Human-in-the-loop approvals: Separate Lambdas for approval, execution, completion; DynamoDB persistence; Slack/SNS notifications.
+- MCP orchestration: Multi-server, Bedrock-powered, per-alias tool disabling, streaming tool calls.
+- Built-in MCP servers: Google Admin, Google Calendar, Jira, TOTP, GIFs (typed tools via FastMCP).
+- AWS/Terraform infra: VPC/networking, IAM (Bedrock, Lambda, Step Functions), DynamoDB (state, sessions, config), Lambda, Step Functions, API Gateway, ECR.
+- Config management: config_store for MCP servers and policies; CLI migration from .env/defaults.
+- Slack Block Kit helpers: Post/edit, JSON-to-blocks parsing.
+- Testing + DX: Extensive pytest suite; uv workflows; Docker support; rich environment.example.
+
 ### What it does
 
 Human-in-the-loop AI orchestration for executing tasks via MCP tools (Google, Jira, etc.), with policy checks, approval flows, and a FastAPI gateway. Includes a CLI for direct runs.
