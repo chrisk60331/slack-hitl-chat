@@ -119,8 +119,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 logger.error(
                     f"Executing action for request {request_id} on behalf of {approval_item.requester}: {action_text}"
                 )
+                # Prepend Slack thread context (agent_prompt) when available
+                # so the MCP agent receives the full conversational history.
+                combined_query = (
+                    f"{getattr(approval_item, 'agent_prompt', '')}\n\n{action_text}"
+                    if getattr(approval_item, "agent_prompt", None)
+                    else action_text
+                )
                 response_body = asyncio.run(
-                    invoke_mcp_client(action_text, approval_item.requester)
+                    invoke_mcp_client(combined_query, approval_item.requester)
                 )
                 table.update_item(
                     Key={"request_id": request_id},

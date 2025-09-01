@@ -188,18 +188,33 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
     approval_table = get_approval_table()
     found = approval_table.get_item(Key={"request_id": request_id}).get("Item")
+    bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
+    bot_user_id = get_bot_user_id(bot_token)
     if found and found.get("request_id") == request_id:
         return {
             "statusCode": 200,
             "body": json.dumps({"ok": True, "mode": "async"}),
         }
     else:
+        thread_messages = fetch_thread_messages(
+            channel_id, thread_ts, token=bot_token, max_messages=50
+        )
+        thread_context = build_thread_context(
+            thread_messages,
+            bot_user_id=bot_user_id,
+            max_turns=12,
+            max_chars=4000,
+        )
+        enriched_agent_prompt = (
+            f"[Slack thread context]\n{thread_context}" if thread_context else ""
+        )
         request_id = (
             handle_new_approval_request(
                 {
                     "slack_channel": channel_id,
                     "slack_ts": thread_ts,
                     "proposed_action": action_text,
+                    "agent_prompt": enriched_agent_prompt or action_text,
                     "requester": requester_email,
                 }
             )
@@ -239,7 +254,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             pass
 
     # Resolve bot token from Secrets (or env fallback)
-    bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
     if not bot_token:
         return {"statusCode": 500, "body": "missing bot token"}
 
@@ -256,17 +270,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         store.put_session_id(channel_id, thread_ts, session_id)
     else:
         session_id = f"session-{channel_id}-{thread_ts}"
-
-    bot_user_id = get_bot_user_id(bot_token)
-    thread_messages = fetch_thread_messages(
-        channel_id, thread_ts, token=bot_token, max_messages=50
-    )
-    thread_context = build_thread_context(
-        thread_messages,
-        bot_user_id=bot_user_id,
-        max_turns=12,
-        max_chars=4000,
-    )
 
     try:
         boto3.client(
@@ -364,7 +367,34 @@ if __name__ == "__main__":
                 "time": "26/Aug/2025:15:38:22 +0000",
                 "timeEpoch": 1756222702016,
             },
-            "body": '{"token":"9CleupMsGtzkWxPEawni1VeZ","team_id":"TMS5FH9DY","api_app_id":"A09A5LF57K6","event":{"user":"U05510F01QR","type":"app_mention","ts":"1756222632.727899","client_msg_id":"29182cf5-675d-4999-8dc1-b6b80c695d7d","text":"hey <@U099WCH3GM9> please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another.","team":"TMS5FH9DY","blocks":[{"type":"rich_text","block_id":"UtW1f","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":" hey "},{"type":"user","user_id":"U099WCH3GM9"},{"type":"text","text":" please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another."}]}]}],"language":{"locale":"en","is_reliable":true},"channel":"C09BDA1E0HJ","event_ts":"1756222632.727899"},"type":"event_callback","event_id":"Ev09CHNCQS5P","event_time":1756222632,"authorizations":[{"enterprise_id":null,"team_id":"TMS5FH9DY","user_id":"U099WCH3GM9","is_bot":true,"is_enterprise_install":false}],"is_ext_shared_channel":false,"event_context":"4-eyJldCI6ImFwcF9tZW50aW9uIiwidGlkIjoiVE1TNUZIOURZIiwiYWlkIjoiQTA5QTVMRjU3SzYiLCJjaWQiOiJDMDlCREExRTBISiJ9"}',
+            "body": json.dumps({
+                "token":"9CleupMsGtzkWxPEawni1VeZ",
+                "team_id":"TMS5FH9DY",
+                "api_app_id":"A09A5LF57K6",
+                "event":{
+                    "user":"U05510F01QR",
+                    "type":"app_mention",
+                    "ts":"1756222632.727899",
+                    "client_msg_id":"29182cf5-675d-4999-8dc1-b6b80c695d7d",
+                    "text":"hey <@U099WCH3GM9> please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another.","team":"TMS5FH9DY","blocks":[{"type":"rich_text","block_id":"UtW1f","elements":[{"type":"rich_text_section","elements":[{"type":"text","text":" hey "},{"type":"user","user_id":"U099WCH3GM9"},{"type":"text","text":" please search Gdrive Customers for the Advocatia client. You\'ll find three project SOWs. Tell me the AI use case for this client. In addition, describe the overarching scope of work executed across all three projects in a brief paragraph, and explain how the projects logically built on one another."}]}]}],
+                    "language":{"locale":"en","is_reliable":True},
+                    "channel":"C09BDA1E0HJ",
+                    "event_ts":"1756222632.727899"},
+                    "type":"event_callback",
+                    "event_id":"Ev09CHNCQS5P",
+                    "event_time":1756222632,
+                    "authorizations":[
+                        {
+                            "enterprise_id": None,
+                            "team_id":"TMS5FH9DY",
+                            "user_id":"U099WCH3GM9",
+                            "is_bot":True,
+                            "is_enterprise_install":False
+                        }
+                    ],
+                    "is_ext_shared_channel":False,
+                    "event_context":"4-eyJldCI6ImFwcF9tZW50aW9uIiwidGlkIjoiVE1TNUZIOURZIiwiYWlkIjoiQTA5QTVMRjU3SzYiLCJjaWQiOiJDMDlCREExRTBISiJ9"
+            }),
             "isBase64Encoded": False,
         },
         {},

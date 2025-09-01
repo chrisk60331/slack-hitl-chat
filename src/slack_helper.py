@@ -465,6 +465,27 @@ def build_thread_context(
     turns: list[str] = []
     for m in messages:
         text = str(m.get("text") or "").strip()
+        # Some bot messages (including our own) may have empty "text" and only blocks.
+        # Extract plain text from common Block Kit structures best-effort.
+        if not text:
+            blocks = m.get("blocks") or []
+            parts: list[str] = []
+            try:
+                for b in blocks:
+                    btype = b.get("type")
+                    if btype == "section":
+                        # section can have text or fields
+                        if isinstance(b.get("text"), dict):
+                            parts.append(str(b["text"].get("text") or ""))
+                        fields = b.get("fields") or []
+                        for f in fields:
+                            if isinstance(f, dict) and f.get("text"):
+                                parts.append(str(f.get("text") or ""))
+                    elif btype == "header" and isinstance(b.get("text"), dict):
+                        parts.append(str(b["text"].get("text") or ""))
+                text = "\n".join(p for p in parts if p).strip()
+            except Exception:
+                text = ""
         if not text:
             continue
         role = _role_of(m)
