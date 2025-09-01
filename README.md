@@ -2,7 +2,7 @@
 
 ### Features
 
--FastAPI gateway + Flask Admin UI: /admin, health, config, Slack interactivity, SSE streaming.
+- FastAPI gateway + Flask Admin UI: /admin, health, config, Slack interactivity, SSE streaming.
 - Click CLI: run orchestrations; migrate-config to DynamoDB.
 - Slack integration: Events API, signature verification, thread context, async via Step Functions.
 - Human-in-the-loop approvals: Separate Lambdas for approval, execution, completion; DynamoDB persistence; Slack/SNS notifications.
