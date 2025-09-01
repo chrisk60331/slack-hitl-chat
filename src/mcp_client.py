@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import logging
 import os
 import random
@@ -16,14 +17,14 @@ from botocore.config import Config as BotoConfig
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from .config_store import get_mcp_servers
+from .config_store import get_mcp_servers, MCPServer
 
 # load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
 MAX_TOKENS = 4095
 # Set up logging
 logger = logging.getLogger(__name__)
-print(f"Logger: {logger}")
+
 
 # System instructions to guide tool usage, especially AWS role add/remove
 SYSTEM_PROMPT_PATH: str = os.path.join(
@@ -42,13 +43,16 @@ async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
     client = MCPClient()
     try:
         alias_to_path: dict[str, str] = {}
+        servers_cfg_list: list[MCPServer] | None = None
         # Prefer config DB MCP servers
         try:
             servers_cfg = get_mcp_servers().servers
+            servers_cfg_list = servers_cfg
             disabled_map: dict[str, list[str]] = {}
             for s in servers_cfg:
                 if s.enabled:
-                    alias_to_path[s.alias] = s.path
+                    if s.path:
+                        alias_to_path[s.alias] = s.path
                     if getattr(s, "disabled_tools", None):
                         disabled_map[s.alias] = list(s.disabled_tools)
             if disabled_map:
@@ -56,8 +60,12 @@ async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
         except Exception as e:
             logging.error(f"Error getting MCP servers: {e}")
 
-        if alias_to_path:
-            await client.connect_to_servers(alias_to_path, requester_email)
+        if servers_cfg_list:
+            await client.connect_to_servers(
+                alias_to_path if alias_to_path else None,
+                requester_email,
+                servers_cfg=servers_cfg_list,
+            )
 
         response_text = await client.process_query(query, requester_email)
     finally:
@@ -306,52 +314,133 @@ class MCPClient:
         return mapping
 
     async def connect_to_servers(
-        self, alias_to_path: dict[str, str], requester_email: str | None = None
+        self,
+        alias_to_path: dict[str, str] | None = None,
+        requester_email: str | None = None,
+        servers_cfg: list[MCPServer] | None = None,
     ) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
         Args:
             alias_to_path: Mapping from alias (e.g., "google", "jira") to server script path
         """
-        for alias, server_script_path in alias_to_path.items():
-            server_script_path = os.path.expanduser(server_script_path)
-            is_python = server_script_path.endswith(".py")
-            is_js = server_script_path.endswith(".js")
-            if not (is_python or is_js):
-                raise ValueError(
-                    f"Server script must be a .py or .js file for alias "
-                    f"{alias}"
-                )
+        # Build a normalized list of launch specs
+        launch_items: list[tuple[str, str, list[str], dict[str, str]]] = []
+        if servers_cfg is not None:
+            for s in servers_cfg:
+                if not s.enabled:
+                    continue
+                if s.command:
+                    cmd = s.command
+                    args = list(s.args or [])
+                    if requester_email:
+                        args = args + [requester_email]
+                    env = dict(s.env or {})
 
-            command = "python" if is_python else "node"
-            logger.error(
-                f"Connecting to server {server_script_path} "
-                f"with requester email {requester_email}"
+                    # If running via uvx in AWS Lambda, default cache dirs to /tmp
+                    if cmd == "uvx":
+                        # Ensure all uv cache/data/tool dirs point to writable /tmp on Lambda
+                        env.setdefault("UV_CACHE_DIR", "/tmp/uvcache")
+                        env.setdefault("XDG_CACHE_HOME", "/tmp")
+                        env.setdefault("XDG_DATA_HOME", "/tmp")
+                        env.setdefault("UV_TOOL_DIR", "/tmp/uvtools")
+                    # If running Node-based MCPs via npx/npm/node in Lambda, use /tmp caches
+                    if cmd in {"npx", "npm", "node"}:
+                        env.setdefault("NPM_CONFIG_CACHE", "/tmp/.npm")
+                        env.setdefault("NPX_CACHE_DIR", "/tmp/.npx")
+                        # Some tools respect HOME for cache locations
+                        env.setdefault("HOME", "/tmp")
+                        # Ensure PATH includes /usr/local/bin for Lambda runtime
+                        path_val = env.get("PATH") or os.environ.get("PATH", "")
+                        if "/usr/local/bin" not in (path_val or "").split(":"):
+                            env["PATH"] = (f"/usr/local/bin:{path_val}" if path_val else "/usr/local/bin")
+
+                    # Merge with parent environment so we don't lose PATH/AWS vars
+                    merged_env = os.environ.copy()
+                    merged_env.update(env)
+                    # Prefer npm exec on AWS Lambda to avoid npx wrapper permission issues
+                    if cmd == "npx" and os.environ.get("AWS_LAMBDA_RUNTIME_API"):
+                        npm_path = shutil.which("npm") or "/usr/local/bin/npm"
+                        cmd = npm_path
+                        args = ["exec", "-y"] + args
+                    launch_items.append((s.alias, cmd, args, merged_env))
+                elif s.path:
+                    server_script_path = os.path.expanduser(s.path)
+                    is_python = server_script_path.endswith(".py")
+                    is_js = server_script_path.endswith(".js")
+                    if not (is_python or is_js):
+                        raise ValueError(
+                            f"Server script must be a .py or .js file for alias {s.alias}"
+                        )
+                    command = "python" if is_python else "node"
+                    args = [server_script_path]
+                    if requester_email:
+                        args.append(requester_email)
+                    launch_items.append((s.alias, command, args, {}))
+                else:
+                    raise ValueError(
+                        f"MCP server '{s.alias}' must specify either command or path"
+                    )
+        elif alias_to_path is not None:
+            for alias, server_script_path in alias_to_path.items():
+                server_script_path = os.path.expanduser(server_script_path)
+                is_python = server_script_path.endswith(".py")
+                is_js = server_script_path.endswith(".js")
+                if not (is_python or is_js):
+                    raise ValueError(
+                        f"Server script must be a .py or .js file for alias {alias}"
+                    )
+                command = "python" if is_python else "node"
+                args = [server_script_path]
+                if requester_email:
+                    args.append(requester_email)
+                launch_items.append((alias, command, args, {}))
+
+        for alias, command, args, env in launch_items:
+            # Resolve command to absolute path if available (helps in Lambda where PATH may differ)
+            resolved = shutil.which(command) or command
+            logger.info(
+                f"Connecting to server {resolved} {args} with requester email {requester_email}"
             )
-            args = [server_script_path]
-            if requester_email:
-                args.append(requester_email)
             server_params = StdioServerParameters(
-                command=command,
+                command=resolved,
                 args=args,
-                env=None,
+                env=env or None,
             )
             logger.info(
                 "mcp.connect.begin",
                 extra={
                     "alias": alias,
-                    "command": command,
-                    "script": server_script_path,
+                    "command": resolved,
+                    "script": " ".join(args),
                 },
             )
+    
             stdio_transport = await self.exit_stack.enter_async_context(
                 stdio_client(server_params)
             )
+            
             stdio, write = stdio_transport
             session = await self.exit_stack.enter_async_context(
                 ClientSession(stdio, write)
             )
-            await session.initialize()
+            try:
+                await session.initialize()
+            except:
+                server_params = StdioServerParameters(
+                    command=resolved,
+                    args=[args[0]],
+                    env=env or None,
+                )
+                stdio_transport = await self.exit_stack.enter_async_context(
+                    stdio_client(server_params)
+                )
+                
+                stdio, write = stdio_transport
+                session = await self.exit_stack.enter_async_context(
+                    ClientSession(stdio, write)
+                )
+                await session.initialize()
             self.sessions[alias] = session
 
             response = await session.list_tools()
@@ -504,7 +593,7 @@ class MCPClient:
                         )
 
                     tool_output = str(result.content)
-                    print(f"Tool '{tool_name}' output: {tool_output}")
+
 
                     tool_results.append(
                         {
@@ -811,9 +900,6 @@ class MCPClient:
 
     async def chat_loop(self) -> None:
         """Run an interactive chat loop."""
-        print("\nMCP Client Started!")
-        print("Type your queries or 'quit' to exit.")
-
         while True:
             try:
                 query = input("\nQuery: ").strip()
@@ -822,10 +908,9 @@ class MCPClient:
                     break
 
                 response = await self.process_query(query)
-                print("\n" + response)
 
             except Exception as e:
-                print(f"\nError: {str(e)}")
+                logging.error(f"\nError: {str(e)}")
 
     async def cleanup(self) -> None:
         """Clean up resources."""

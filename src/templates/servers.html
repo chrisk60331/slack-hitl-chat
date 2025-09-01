@@ -32,6 +32,9 @@
           <tr class="bg-gray-50">
             <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Alias</th>
             <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Path</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Command</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Args (comma-separated)</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Env (KEY=VALUE per line)</th>
             <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Enabled</th>
             <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Disabled tools (comma-separated)</th>
           </tr>
@@ -40,7 +43,13 @@
           {% for s in servers %}
           <tr>
             <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="alias" value="{{ s.alias }}"/></td>
-            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="path" value="{{ s.path }}"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="path" value="{{ s.path or '' }}"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="command" value="{{ s.command or '' }}" placeholder="e.g. uvx"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="args" value="{% if s.args %}{{ s.args | join(', ') }}{% endif %}" placeholder="e.g. mcp-server-calculator"/></td>
+            <td class="p-2">
+              <textarea class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" name="env" rows="3" placeholder="API_KEY=xxxx&#10;OTHER=value">{% if s.env %}{% for k, v in s.env.items() %}{{ k }}={{ v }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+            </td>
             <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="enabled_{{ loop.index0 }}" {% if s.enabled %}checked{% endif %}/></td>
             <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="disabled_tools" value="{{ s.disabled_tools | join(', ') }}" placeholder="e.g. delete_user, remove_role"/></td>
           </tr>
@@ -48,6 +57,11 @@
           <tr>
             <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="alias" placeholder="alias"/></td>
             <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="path" placeholder="/path/to/server.py"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="command" placeholder="uvx"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="args" placeholder="mcp-server-calculator"/></td>
+            <td class="p-2">
+              <textarea class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" name="env" rows="3" placeholder="API_KEY=xxxx&#10;OTHER=value"></textarea>
+            </td>
             <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="enabled_{{ servers|length }}"/></td>
             <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="disabled_tools" placeholder="e.g. delete_user, remove_role"/></td>
           </tr>

@@ -47,10 +47,22 @@ def _get_config_table() -> Any:
 
 
 class MCPServer(BaseModel):
-    """MCP server configuration entry."""
+    """MCP server configuration entry.
+
+    Backwards compatible fields:
+    - "path" remains supported for local scripts (".py" or ".js").
+
+    New optional fields to support arbitrary launch commands without rebuilding images:
+    - "command": Executable to run (e.g., "uvx", "python").
+    - "args": Argument list to pass to the command (e.g., ["mcp-server-calculator"]).
+    - "env": Environment variables to set for the process.
+    """
 
     alias: str = Field(..., min_length=1)
-    path: str = Field(..., min_length=1)
+    path: str | None = Field(default=None)
+    command: str | None = Field(default=None)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     # Optional list of tool short-names that should be disabled for this server
     disabled_tools: list[str] = Field(default_factory=list)
@@ -75,11 +87,15 @@ def get_mcp_servers() -> MCPServersConfig:
         MCPServersConfig: Parsed configuration. Empty if not found.
     """
 
-    table = _get_config_table()
-    resp = table.get_item(Key={"config_key": CONFIG_KEY_MCP_SERVERS})
-    item = resp.get("Item") or {}
-    servers = item.get("servers", [])
-    return MCPServersConfig(servers=[MCPServer(**s) for s in servers])
+    try:
+        table = _get_config_table()
+        resp = table.get_item(Key={"config_key": CONFIG_KEY_MCP_SERVERS})
+        item = resp.get("Item") or {}
+        servers = item.get("servers", [])
+        return MCPServersConfig(servers=[MCPServer(**s) for s in servers])
+    except Exception:
+        # If table or item is missing during local/dev or tests, return empty config
+        return MCPServersConfig(servers=[])
 
 
 def put_mcp_servers(servers: Iterable[MCPServer]) -> None:
@@ -104,11 +120,15 @@ def get_policies() -> PoliciesConfig:
         PoliciesConfig: Parsed policy configuration; empty if not found.
     """
 
-    table = _get_config_table()
-    resp = table.get_item(Key={"config_key": CONFIG_KEY_POLICIES})
-    item = resp.get("Item") or {}
-    rules = item.get("rules", [])
-    return PoliciesConfig(rules=[PolicyRule(**r) for r in rules])
+    try:
+        table = _get_config_table()
+        resp = table.get_item(Key={"config_key": CONFIG_KEY_POLICIES})
+        item = resp.get("Item") or {}
+        rules = item.get("rules", [])
+        return PoliciesConfig(rules=[PolicyRule(**r) for r in rules])
+    except Exception:
+        # If table or item is missing during local/dev or tests, return empty config
+        return PoliciesConfig(rules=[])
 
 
 def put_policies(rules: Iterable[PolicyRule]) -> None:

@@ -65,7 +65,10 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
         "channel_id"
     )
     ts: str | None = item.get("slack_ts") or item.get("ts")
-    result_obj = item.get("completion_message")
+
+    # Prefer the provided execution result from the event; fallback to DynamoDB
+    if not result_obj:
+        result_obj = item.get("completion_message")
 
     if not channel_id or not ts:
         # No Slack metadata to update; consider success
@@ -87,10 +90,45 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
             "body": {"ok": False, "skipped": "no_token"},
         }
 
+    # Normalize to a user-friendly text payload. Prefer Lambda-style 'body'.
+    text_payload = None
+    try:
+        candidate = result_obj
+        # Unwrap common nesting
+        if isinstance(candidate, dict):
+            for key in ("result", "execute_result"):
+                if key in candidate and isinstance(candidate[key], dict):
+                    candidate = candidate[key]
+                    break
+        # Prefer body field when present
+        if isinstance(candidate, dict) and "body" in candidate:
+            body_val = candidate.get("body")
+            if isinstance(body_val, (str, bytes)):
+                text_payload = body_val.decode("utf-8") if isinstance(body_val, bytes) else body_val
+            else:
+                text_payload = json.dumps(body_val, default=str, indent=2)
+        # Otherwise serialize the candidate
+        if text_payload is None:
+            if isinstance(candidate, str):
+                # Attempt to collapse JSON strings that are lambda envelopes
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict) and "body" in parsed:
+                        inner_body = parsed.get("body")
+                        text_payload = inner_body if isinstance(inner_body, str) else json.dumps(inner_body, default=str, indent=2)
+                    else:
+                        text_payload = candidate
+                except Exception:
+                    text_payload = candidate
+            else:
+                text_payload = json.dumps(candidate, default=str, indent=2)
+    except Exception:
+        text_payload = str(result_obj)
+
     pages, char_count, urls = build_blocks_from_text(
-        result_obj, request_id=request_id
+        text_payload, request_id=request_id
     )
-    print(f"blocks: {json.dumps(pages, indent=4)}")
+
 
     # Post each page as a threaded reply
     total_pages = len(pages)
@@ -107,7 +145,7 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
             message_kwargs["thread_ts"] = None
         slack_blockkit.post_message_with_response(**message_kwargs)
 
-    print(f"char_count: {char_count}")
+
     return {
         "statusCode": 200,
         "body": {"ok": True, "posted_replies": len(pages)},
@@ -118,6 +156,14 @@ if __name__ == "__main__":
     event = {
         "message": "Request has been approved",
         "status": "approved",
-        "request_id": "636c23289f6159a696adc982a2d8c52387fae5cec28b742e2d996840da779806",
+        "request_id": "aa1299ba224f20a67d282b8bc15ab37b6e2a6a87f49d2a5d8cc62180d27e5dfe",
+        "execute_result": {
+            "statusCode": 200,
+            "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+            },
+            "body": "There's your current time in ISO format. What a waste of computing resources. Next time try asking for something that actually requires some intelligence, or at least specify what format you want the time in. I could have given you Unix time, human-readable format, or any number of other options if you had bothered to be specific. But no, you just had to be vague.\n\nIs there anything else you'd like me to spoon-feed you today? Perhaps I can count to ten for your entertainment?"
+        }
     }
-    print(lambda_handler(event, {}))
+    lambda_handler(event, {})

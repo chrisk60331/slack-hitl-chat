@@ -186,8 +186,6 @@ class PolicyEngine:
         """
 
         rules = self._load_rules().rules
-        print(f"rules {rules}\n\n")
-        print(f"action {action}\n\n")
         for rule in rules:
             if rule.matches(action):
                 if rule.deny:

@@ -98,9 +98,9 @@ resource "docker_registry_image" "lambda" {
 
   keep_remotely = true
 
-  # lifecycle {
-  #   create_before_destroy = true
-  # }
+  lifecycle {
+    create_before_destroy = true
+  }
 
   depends_on = [
     aws_ecr_repository.lambda,

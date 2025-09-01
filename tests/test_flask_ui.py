@@ -84,3 +84,100 @@ def test_servers_save_and_load_disabled_tools(
         "files_delete",
         "remove_role",
     ]
+
+
+def test_servers_save_command_args(_stub_config_store: None) -> None:
+    from src.config_store import get_mcp_servers
+
+    app = create_app()
+    client = app.test_client()
+
+    resp = client.post(
+        "/servers",
+        data={
+            "alias": ["calculator"],
+            "path": [""],
+            "command": ["uvx"],
+            "args": ["mcp-server-calculator"],
+            "enabled_0": "on",
+            "disabled_tools": [""],
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    cfg = get_mcp_servers()
+    assert len(cfg.servers) == 1
+    s = cfg.servers[0]
+    assert s.alias == "calculator"
+    assert s.command == "uvx"
+    assert s.args == ["mcp-server-calculator"]
+    assert s.enabled is True
+
+
+def test_servers_env_parsing_and_preservation(
+    _stub_config_store: None,
+) -> None:
+    from src.config_store import get_mcp_servers, MCPServer, MCPServersConfig
+
+    app = create_app()
+    client = app.test_client()
+
+    # Seed existing config with octagon env
+    from src import config_store as cs
+
+    existing = MCPServersConfig(
+        servers=[
+            MCPServer(
+                alias="octagon",
+                path="/abs/path/octagon/mcp_server.py",
+                enabled=True,
+                env={"OCTAGON_API_KEY": "keepme", "REGION": "us-east-1"},
+            )
+        ]
+    )
+
+    # Inject storage via the stubbed put/get in this test module's fixture storage
+    # by calling the patched put
+    from src.flask_ui import put_mcp_servers as patched_put
+
+    patched_put(existing.servers)
+
+    # 1) Post update WITHOUT env for same alias -> should preserve existing env
+    resp = client.post(
+        "/servers",
+        data={
+            "alias": ["octagon"],
+            "path": ["/abs/path/octagon/mcp_server.py"],
+            "enabled_0": "on",
+            # no env field provided
+            "disabled_tools": [""],
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    cfg = get_mcp_servers()
+    assert len(cfg.servers) == 1
+    s = cfg.servers[0]
+    assert s.alias == "octagon"
+    assert s.env == {"OCTAGON_API_KEY": "keepme", "REGION": "us-east-1"}
+
+    # 2) Post update WITH env block -> should replace env with parsed keys
+    resp = client.post(
+        "/servers",
+        data={
+            "alias": ["octagon"],
+            "path": ["/abs/path/octagon/mcp_server.py"],
+            "enabled_0": "on",
+            "env": ["OCTAGON_API_KEY=newvalue\n# comment\nEXTRA = 123"],
+            "disabled_tools": [""],
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    cfg = get_mcp_servers()
+    assert len(cfg.servers) == 1
+    s = cfg.servers[0]
+    assert s.env == {"OCTAGON_API_KEY": "newvalue", "EXTRA": "123"}

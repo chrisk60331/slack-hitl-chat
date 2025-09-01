@@ -190,7 +190,6 @@ def list_folders(request: ListFoldersRequest) -> dict:
     Returns:
         dict: List of folders with metadata.
     """
-    print(f"list_folders request: {request}")
     return drive_service.list_folders(request)
 
 
@@ -272,6 +271,5 @@ token = key_pair.create_token(
 
 
 if __name__ == "__main__":
-    print(f"Test Bearer token for dev: {token}\n")
     # Use stdio transport for MCP client compatibility
     mcp.run(transport="stdio")

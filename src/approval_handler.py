@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+import logging
 
 import boto3
 from botocore.exceptions import ClientError
@@ -120,16 +121,11 @@ def _slack_update(
 ) -> None:
     try:
         if slack_channel and slack_ts:
-            print(
-                f"slack_channel {slack_channel} slack_ts {slack_ts} text {text} blocks {blocks}"
-            )
-            print(
-                update_message(
-                    slack_channel, slack_ts, text=text, blocks=blocks
-                )
+            update_message(
+                slack_channel, slack_ts, text=text, blocks=blocks
             )
     except Exception as e:  # pragma: no cover - best effort
-        print(f"Slack update failed: {e}")
+        logging.error(f"Slack update failed: {e}")
 
 
 def get_lambda_function_url() -> str:
@@ -169,7 +165,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     import json
     from urllib.parse import unquote
 
-    print(f"Approval handler received event: {event}\n\n")
     try:
         # Handle approval decision (POST with approval data)
         # Opportunistic validation to surface parsing errors early (helps tests and debugging)
@@ -195,22 +190,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             event["body"]["action"] = json.loads(
                 unquote(base64.b64decode(body)).replace("payload=", "")
             )["actions"][0]["action_id"]
-            print(f"transformed event {event}\n\n")
 
-        print(f"event {event}\n\n")
         # Route the request
         if _is_approval_decision(event):
-            print(f"_is_approval_decision event {event}+\n\n")
             return _handle_approval_decision(event)
 
         # Handle status check (existing request ID lookup)
         else:
-            print(f"_has_request_id_for_status_check event {event}")
             return _handle_status_check(event)
 
     except Exception as e:
         error_response = {"error": "operation failed", "details": str(e)}
-        print(f"error_response {error_response}")
         traceback.print_exc()
         return {"statusCode": 500, "body": json.dumps(error_response)}
 
@@ -219,7 +209,6 @@ def _is_approval_decision(event) -> bool:
     """Check if the event represents an approval decision."""
     # Check for direct approval decision in body
     body = event.get("body") or event.get("Input", {}).get("body")
-    print("body", body)
     if isinstance(body, str):
         try:
             parsed_body = json.loads(body)
@@ -267,9 +256,7 @@ def _extract_request_id_for_status_check(event: dict[str, Any]) -> str:
 def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     """Handle approval decision requests."""
     # Extract decision data from event
-    print(f"_handle_approval_decision event {event}")
     decision_data = _extract_decision_data(event)
-    print(f"decision_data {decision_data}")
     decision = ApprovalDecision(**decision_data)
 
     # Get existing approval item
@@ -329,7 +316,6 @@ def _extract_decision_data(event: dict[str, Any]) -> dict[str, Any]:
         or event.get("queryStringParameters")
         or {}
     )
-    print(f"\n\nbody {body}\n\n")
     if isinstance(body, str):
         try:
             return json.loads(body)
@@ -374,10 +360,9 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     # Create new approval request
     if "Input" in event:
         event = event["Input"]
-    print(f"_handle_new_approval_request event {event}")
 
     proposed_action_text = (event.get("proposed_action") or "").strip()
-    print(f"proposed_action_text {proposed_action_text}\n\n")
+    
     slack_channel = event.get("slack_channel", "")
     slack_ts = event.get("slack_ts", "")
 
@@ -385,7 +370,7 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     deterministic_request_id = compute_request_id_from_action(
         proposed_action_text
     )
-    print(f"deterministic_request_id {deterministic_request_id}\n\n")
+    
     # Evaluate policy using orchestrator policy code
     inferred_category, inferred_resource = infer_category_and_resource(
         proposed_action_text
@@ -398,9 +383,9 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         environment=os.getenv("ENVIRONMENT", "dev"),
         user_id=event.get("requester") or "slack_user",
     )
-    print(f"proposed_action {proposed_action}\n\n")
+    
     decision = PolicyEngine().evaluate(proposed_action)
-    print(f"decision {str(decision.outcome.value)}\n\n")
+    
     approval_item = ApprovalItem(
         request_id=deterministic_request_id,
         requester=event.get("requester", ""),
@@ -412,9 +397,9 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         slack_channel=slack_channel,
         slack_ts=slack_ts,
         completion_status=str(COMPLETION_STATUS.PENDING),
-        completion_message=decision.outcome,
+        completion_message="",
     )
-    print(f"approval_item {approval_item.to_dynamodb_item()}\n\n")
+    
     send_notifications(
         request_id=approval_item.request_id,
         action=approval_item.approval_status,
@@ -429,7 +414,7 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     approval_item.approval_communication_status = (
         APPROVAL_COMMUNICATION_STATUS.SENT.value
     )
-    print(approval_item.to_dynamodb_item())
+
     get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
     blocks = get_header_and_context(
         deterministic_request_id, f"Request {decision.outcome.value}"
@@ -543,10 +528,10 @@ def send_notifications(
             )
             if post_message("foo", message_content["title"], blocks=blocks):
                 notification_sent = True
-                print(f"Slack notification sent for request {request_id}")
+
 
     except Exception as e:  # pragma: no cover - defensive
-        print(f"Error sending Slack notification: {e}")
+        logging.error(f"Error sending Slack notification: {e}")
 
     # SNS topic (optional)
     try:
@@ -558,9 +543,9 @@ def send_notifications(
                 Message=sns_message,
             )
             notification_sent = True
-            print(f"SNS notification sent for request {request_id}")
+
     except Exception as e:
-        print(f"Error sending SNS notification to {SNS_TOPIC_ARN}: {e}")
+        logging.error(f"Error sending SNS notification to {SNS_TOPIC_ARN}: {e}")
 
     return notification_sent
 
@@ -619,12 +604,10 @@ def get_approval_status(request_id: str) -> ApprovalItem | None:
             Key={"request_id": request_id}
         )
         item_data = response.get("Item")
-        print(f"Approval item data: {item_data}")
         if item_data:
             return ApprovalItem.from_dynamodb_item(item_data)
         return None
     except ClientError as e:
-        print(f"Error retrieving approval status: {e}")
         return None
 
 

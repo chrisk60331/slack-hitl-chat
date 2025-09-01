@@ -112,9 +112,9 @@ def update_message(
     if blocks is not None:
         payload["blocks"] = blocks
     payload["as_user"] = True
-    print(f"update_message payload {payload}")
+
     data = _slack_api("chat.update", bot_token, payload)
-    print(f"update_message data {data}")
+
     if not data.get("ok"):
         payload["thread_ts"] = ts
         data = _slack_api("chat.postMessage", bot_token, payload)

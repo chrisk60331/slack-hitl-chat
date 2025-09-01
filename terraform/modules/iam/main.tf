@@ -420,3 +420,32 @@ resource "aws_iam_role_policy_attachment" "bedrock_guardrails_policy_attachment"
   role       = aws_iam_role.agentcore_app_role.name
   policy_arn = aws_iam_policy.bedrock_guardrails_policy[0].arn
 } 
+
+resource "aws_iam_role_policy_attachment" "lambda_execution_role_attachment" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = aws_iam_policy.lambda_execution_role_aws_use_mcp_policy.arn
+}
+
+resource "aws_iam_policy" "lambda_execution_role_aws_use_mcp_policy" {
+  name        = "${var.name_prefix}-lambda-execution-role-policy"
+  description = "IAM policy for Lambda to access Step Functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:List*",
+          "s3:Describe*",
+          "dynamodb:List*",
+          "dynamodb:Describe*",
+          "rds:Describe*",
+          "rds:List*",
+
+        ]
+        Resource = var.stepfunctions_arn != "" ? var.stepfunctions_arn : "*"
+      }
+    ]
+  })
+}

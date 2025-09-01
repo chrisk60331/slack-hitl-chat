@@ -22,6 +22,7 @@ import json
 import os
 import re
 from typing import Any
+import logging
 
 import boto3
 import requests
@@ -144,7 +145,7 @@ def slack_userid_to_email(user_id: str, bot_token: str) -> str | None:
         resp = client.users_info(user=user_id)
         return f"{resp['user']['name']}@{os.environ.get('DOMAIN', '')}"
     except Exception as e:
-        print(f"SlackApiError: {e}")
+        logging.error(f"SlackApiError: {e}")
         return None
 
 
@@ -154,7 +155,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Supports URL verification and message events. Streams responses back by posting
     an initial message and editing it with incremental content.
     """
-    print(f"event: {event}")
     raw_body: bytes
     if "isBase64Encoded" in event and event.get("isBase64Encoded"):
         raw_body = base64.b64decode(event.get("body") or b"")
@@ -169,13 +169,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # URL verification challenge
     if body.get("type") == "url_verification":
-        print(
-            {
-                "statusCode": 200,
-                "headers": {"Content-Type": "text/plain"},
-                "body": body.get("challenge", ""),
-            }
-        )
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "text/plain"},
@@ -196,9 +189,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     approval_table = get_approval_table()
     found = approval_table.get_item(Key={"request_id": request_id}).get("Item")
     if found and found.get("request_id") == request_id:
-        print(
-            f"request_id {compute_request_id_from_action(action_text)} found in table"
-        )
         return {
             "statusCode": 200,
             "body": json.dumps({"ok": True, "mode": "async"}),
@@ -251,7 +241,6 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # Resolve bot token from Secrets (or env fallback)
     bot_token = secrets.get("bot_token", os.environ.get("SLACK_BOT_TOKEN", ""))
     if not bot_token:
-        print("missing bot token")
         return {"statusCode": 500, "body": "missing bot token"}
 
     # Map to session
@@ -299,7 +288,7 @@ def events_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except Exception as e:
         # If async invoke fails, fall back to sync to at least produce a response
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")
 
     # Ack immediately for async path
     return {

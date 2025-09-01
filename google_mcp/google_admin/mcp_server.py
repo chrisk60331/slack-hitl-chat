@@ -221,6 +221,5 @@ token = key_pair.create_token(
 
 
 if __name__ == "__main__":
-    print(f"Test Bearer token for dev: {token}\n")
     # Use stdio transport for MCP client compatibility
     mcp.run(transport="stdio")

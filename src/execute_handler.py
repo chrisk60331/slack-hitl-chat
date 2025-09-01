@@ -147,7 +147,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
             "body": response_body,
         }
-        print(f"result {result}")
+
         return result
 
     except Exception as e:
@@ -160,6 +160,31 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "details": str(e),
             "exception_type": str(type(e)),
         }
+        # Attempt to persist failure details to DynamoDB for notifier
+        try:
+            req_id = None
+            # Extract request_id best-effort from the event
+            if isinstance(event, dict):
+                body = event.get("body", event)
+                if isinstance(body, str):
+                    try:
+                        body = json.loads(body)
+                    except Exception:
+                        body = {}
+                if isinstance(body, dict):
+                    req_id = body.get("request_id")
+            if req_id:
+                table.update_item(
+                    Key={"request_id": req_id},
+                    UpdateExpression="SET completion_status = :status, completion_message = :message",
+                    ExpressionAttributeValues={
+                        ":status": str(COMPLETION_STATUS.FAILED),
+                        ":message": json.dumps(error_response, default=str),
+                    },
+                )
+        except Exception:
+            # Best effort; do not mask original error
+            pass
 
         return {
             "statusCode": 500,

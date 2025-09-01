@@ -32,13 +32,23 @@ def create_app() -> Flask:
     @app.post("/servers")
     def save_servers() -> Any:
         rows: list[MCPServer] = []
+        # Load existing config to preserve env for rows left blank
+        existing_cfg = get_mcp_servers()
+        existing_by_alias: dict[str, MCPServer] = {s.alias: s for s in existing_cfg.servers}
         aliases = request.form.getlist("alias")
         paths = request.form.getlist("path")
+        commands = request.form.getlist("command")
+        args_lists = request.form.getlist("args")
+        env_blocks = request.form.getlist("env")
         disableds = request.form.getlist("disabled_tools")
         for i, alias in enumerate(aliases):
             alias = (alias or "").strip()
             path = (paths[i] if i < len(paths) else "").strip()
-            if not alias or not path:
+            command = (commands[i] if i < len(commands) else "").strip()
+            args_raw = (args_lists[i] if i < len(args_lists) else "").strip()
+            env_raw = (env_blocks[i] if i < len(env_blocks) else "").strip()
+            # Skip entirely empty rows
+            if not alias or (not path and not command):
                 continue
             enabled = request.form.get(f"enabled_{i}") is not None
             # Parse comma-separated disabled tools (short names)
@@ -49,10 +59,31 @@ def create_app() -> Flask:
                 if n:
                     # Store bare short name
                     disabled_list.append(n.split("__", 1)[-1])
+            # Parse args as comma-separated list
+            args: list[str] = [a.strip() for a in args_raw.split(",") if a.strip()] if args_raw else []
+            # Parse env block as KEY=VALUE per line; preserve existing if left blank
+            if env_raw:
+                env: dict[str, str] = {}
+                for line in env_raw.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if k:
+                        env[k] = v
+            else:
+                env = dict(existing_by_alias.get(alias).env) if alias in existing_by_alias else {}
             rows.append(
                 MCPServer(
                     alias=alias,
-                    path=path,
+                    path=path or None,
+                    command=command or None,
+                    args=args,
+                    env=env,
                     enabled=enabled,
                     disabled_tools=disabled_list,
                 )
@@ -132,20 +163,24 @@ def create_app() -> Flask:
     @app.get("/approvals")
     def approvals() -> str:
         limit = int(request.args.get("limit", "50"))
-        table = get_approval_table()
-        # Paginated scan and sort by creation timestamp (desc)
-        items: list[dict[str, Any]] = []
-        start_key: dict[str, Any] | None = None
-        max_scan: int = max(limit * 5, 100)
-        while True:
-            scan_kwargs: dict[str, Any] = {"Limit": min(200, max_scan)}
-            if start_key:
-                scan_kwargs["ExclusiveStartKey"] = start_key
-            resp = table.scan(**scan_kwargs)
-            items.extend(resp.get("Items", []))
-            start_key = resp.get("LastEvaluatedKey")
-            if not start_key or len(items) >= max_scan:
-                break
+        try:
+            table = get_approval_table()
+            # Paginated scan and sort by creation timestamp (desc)
+            items: list[dict[str, Any]] = []
+            start_key: dict[str, Any] | None = None
+            max_scan: int = max(limit * 5, 100)
+            while True:
+                scan_kwargs: dict[str, Any] = {"Limit": min(200, max_scan)}
+                if start_key:
+                    scan_kwargs["ExclusiveStartKey"] = start_key
+                resp = table.scan(**scan_kwargs)
+                items.extend(resp.get("Items", []))
+                start_key = resp.get("LastEvaluatedKey")
+                if not start_key or len(items) >= max_scan:
+                    break
+        except Exception:
+            # If approvals table is missing (e.g., local tests), show empty list
+            items = []
 
         def _ts_key(d: dict[str, Any]) -> float:
             ts = d.get("timestamp", "")

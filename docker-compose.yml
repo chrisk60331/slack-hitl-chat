@@ -5,8 +5,8 @@ services:
   dynamodb-local:
     image: amazon/dynamodb-local:latest
     container_name: agentcore-dynamodb-local
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
     networks:
       - agentcore-local
@@ -18,20 +18,23 @@ services:
       dockerfile: Dockerfile
       target: execute
     container_name: agentcore-execute-local
-    env_file: .env
+    env_file: environment.example
     environment:
       # Lambda runtime simulation
       - LAMBDA_TASK_ROOT=/var/task
       - _HANDLER=src.execute_handler.lambda_handler
-      - TABLE_NAME=agentcore-approvals-local
-      - LOCAL_DEV=true
+      - TABLE_NAME=agentcore-dev-approval-log
+      - CONFIG_TABLE_NAME=agentcore-dev-config
+      - AWS_DEFAULT_REGION=us-west-2
+      - PYTHONPATH=/var/task:/opt/google_mcp
+      - LOG_LEVEL=DEBUG
     ports:
       - "9000:8080"  # Lambda Runtime Interface Emulator port
     volumes:
       - ./tests:/var/task/tests:ro
+      - ./environment.example:/var/task/.env:ro
+      - ~/.aws:/root/.aws:ro
       - .env:/var/task/.env:ro
-    depends_on:
-      - dynamodb-local
     networks:
       - agentcore-local
     # Use the default Lambda entrypoint with handler as argument
