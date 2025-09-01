@@ -37,5 +37,3 @@ def test_is_tool_allowed_defaults_to_allowed_when_alias_missing() -> None:
     client = MCPClient()
     # No mapping set yet
     assert client.is_tool_allowed("unknown", "anything") is True
-
-

@@ -59,9 +59,7 @@ async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
         if alias_to_path:
             await client.connect_to_servers(alias_to_path, requester_email)
 
-        response_text = await client.process_query(
-            query, requester_email
-        )
+        response_text = await client.process_query(query, requester_email)
     finally:
         await client.cleanup()
 

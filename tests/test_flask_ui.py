@@ -25,13 +25,19 @@ def _stub_config_store(monkeypatch: pytest.MonkeyPatch) -> None:
     from src import flask_ui as ui
 
     def fake_get_mcp_servers():  # type: ignore[no-redef]
-        return cs.MCPServersConfig(servers=[cs.MCPServer(**d) for d in storage["servers"]])
+        return cs.MCPServersConfig(
+            servers=[cs.MCPServer(**d) for d in storage["servers"]]
+        )
 
     def fake_put_mcp_servers(servers):  # type: ignore[no-redef]
         storage["servers"] = [s.model_dump() for s in servers]
 
-    monkeypatch.setattr("src.config_store.get_mcp_servers", fake_get_mcp_servers)
-    monkeypatch.setattr("src.config_store.put_mcp_servers", fake_put_mcp_servers)
+    monkeypatch.setattr(
+        "src.config_store.get_mcp_servers", fake_get_mcp_servers
+    )
+    monkeypatch.setattr(
+        "src.config_store.put_mcp_servers", fake_put_mcp_servers
+    )
     # Also patch the symbols imported into the Flask module
     monkeypatch.setattr(ui, "get_mcp_servers", fake_get_mcp_servers)
     monkeypatch.setattr(ui, "put_mcp_servers", fake_put_mcp_servers)
@@ -46,7 +52,9 @@ def test_flask_routes_smoke() -> None:
     assert client.get("/approvals").status_code == 200
 
 
-def test_servers_save_and_load_disabled_tools(_stub_config_store: None) -> None:
+def test_servers_save_and_load_disabled_tools(
+    _stub_config_store: None,
+) -> None:
     from src.config_store import get_mcp_servers
 
     app = create_app()
@@ -59,7 +67,9 @@ def test_servers_save_and_load_disabled_tools(_stub_config_store: None) -> None:
             "alias": ["google"],
             "path": ["/abs/path/google_mcp/google_admin/mcp_server.py"],
             "enabled_0": "on",
-            "disabled_tools": ["delete_user, remove_role , google__files_delete"],
+            "disabled_tools": [
+                "delete_user, remove_role , google__files_delete"
+            ],
         },
         follow_redirects=True,
     )
@@ -69,6 +79,8 @@ def test_servers_save_and_load_disabled_tools(_stub_config_store: None) -> None:
     assert len(cfg.servers) == 1
     s = cfg.servers[0]
     # Normalized to short names
-    assert sorted(s.disabled_tools) == ["delete_user", "files_delete", "remove_role"]
-
-
+    assert sorted(s.disabled_tools) == [
+        "delete_user",
+        "files_delete",
+        "remove_role",
+    ]

@@ -33,7 +33,9 @@ def _ensure_table() -> None:
         client.create_table(
             TableName=os.environ["CONFIG_TABLE_NAME"],
             BillingMode="PAY_PER_REQUEST",
-            AttributeDefinitions=[{"AttributeName": "config_key", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "config_key", "AttributeType": "S"}
+            ],
             KeySchema=[{"AttributeName": "config_key", "KeyType": "HASH"}],
         )
 
@@ -70,5 +72,3 @@ def test_config_policies_roundtrip() -> None:
     r = client.get("/config/policies")
     assert r.status_code == 200
     assert r.json()["rules"][0]["name"] == "require_doc_access"
-
-

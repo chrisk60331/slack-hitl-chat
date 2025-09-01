@@ -67,7 +67,9 @@ class PutServersPayload(BaseModel):
 
 
 @app.put("/config/mcp-servers", response_model=MCPServersConfig)
-async def replace_mcp_servers(payload: PutServersPayload) -> dict[str, list[dict[str, Any]]]:
+async def replace_mcp_servers(
+    payload: PutServersPayload,
+) -> dict[str, list[dict[str, Any]]]:
     put_mcp_servers(payload.servers)
     return {"servers": [s.model_dump() for s in payload.servers]}
 
@@ -86,7 +88,9 @@ class PutPoliciesPayload(BaseModel):
 
 
 @app.put("/config/policies", response_model=PoliciesConfig)
-async def put_policy_rules(payload: PutPoliciesPayload) -> dict[str, list[dict[str, Any]]]:
+async def put_policy_rules(
+    payload: PutPoliciesPayload,
+) -> dict[str, list[dict[str, Any]]]:
     rules = [
         # validate using PolicyRule model by round-tripping through PoliciesConfig
         # but here directly construct is fine
@@ -109,7 +113,7 @@ async def put_policy_rules(payload: PutPoliciesPayload) -> dict[str, list[dict[s
 async def list_approvals(limit: int = 50) -> dict[str, list[dict[str, Any]]]:
     """Return recent approvals from DynamoDB (StatusIndex by timestamp)."""
     table = get_approval_table()
-    
+
     # Fallback to scan if GSI names differ; use conservative limit
     try:
         resp = table.query(
@@ -124,6 +128,15 @@ async def list_approvals(limit: int = 50) -> dict[str, list[dict[str, Any]]]:
     except Exception:
         resp = table.scan(Limit=limit)
         items = resp.get("Items", [])
+    # Ensure descending order by timestamp for consumers
+    try:
+        items = sorted(
+            items,
+            key=lambda d: d.get("timestamp", ""),
+            reverse=True,
+        )
+    except Exception:
+        pass
     return {"items": items}
 
 

@@ -85,7 +85,9 @@ def create_app() -> Flask:
                 continue
             cats = [
                 ApprovalCategory(c.strip())
-                for c in (categories[i] if i < len(categories) else "").split(",")
+                for c in (categories[i] if i < len(categories) else "").split(
+                    ","
+                )
                 if c.strip()
             ]
             env_list = [
@@ -101,10 +103,14 @@ def create_app() -> Flask:
             ra = request.form.get(f"require_approval_{i}") is not None
             dn = request.form.get(f"deny_{i}") is not None
             min_amt = (
-                float(min_amounts[i]) if i < len(min_amounts) and min_amounts[i] else None
+                float(min_amounts[i])
+                if i < len(min_amounts) and min_amounts[i]
+                else None
             )
             max_amt = (
-                float(max_amounts[i]) if i < len(max_amounts) and max_amounts[i] else None
+                float(max_amounts[i])
+                if i < len(max_amounts) and max_amounts[i]
+                else None
             )
             rules.append(
                 PolicyRule(
@@ -140,11 +146,18 @@ def create_app() -> Flask:
         except Exception:
             resp = table.scan(Limit=limit)
             items = resp.get("Items", [])
+        # Ensure client receives items sorted by most recent first
+        try:
+            items = sorted(
+                items,
+                key=lambda d: d.get("timestamp", ""),
+                reverse=True,
+            )
+        except Exception:
+            pass
         return render_template("approvals.html", items=items)
 
     return app
 
 
 app = create_app()
-
-

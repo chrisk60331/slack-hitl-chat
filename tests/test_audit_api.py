@@ -66,5 +66,3 @@ def test_audit_list_approvals() -> None:
     data = r.json()
     assert isinstance(data.get("items"), list)
     assert any(i.get("request_id") == "r-1" for i in data["items"]) or True
-
-

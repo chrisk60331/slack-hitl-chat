@@ -28,15 +28,14 @@ def _ensure_local_dynamodb() -> None:
         client.create_table(
             TableName=os.environ["CONFIG_TABLE_NAME"],
             BillingMode="PAY_PER_REQUEST",
-            AttributeDefinitions=[{"AttributeName": "config_key", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "config_key", "AttributeType": "S"}
+            ],
             KeySchema=[{"AttributeName": "config_key", "KeyType": "HASH"}],
         )
 
 
 def test_cli_migrate_config_servers_and_policies(monkeypatch) -> None:
-
-
-
     runner = CliRunner()
     result = runner.invoke(cli, ["migrate-config", "--include", "all"])
     assert result.exit_code == 0
@@ -47,5 +46,3 @@ def test_cli_migrate_config_servers_and_policies(monkeypatch) -> None:
 
     policies = get_policies().rules
     assert len(policies) >= 1
-
-

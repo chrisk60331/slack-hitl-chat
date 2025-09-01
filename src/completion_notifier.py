@@ -103,7 +103,7 @@ def lambda_handler(event: dict[str, Any], _: Any) -> dict[str, Any]:
             "blocks": page_blocks,
             "thread_ts": ts,
         }
-        if urls and not urls[0].endswith(".gif"):
+        if urls and urls[0].endswith(".gif"):
             message_kwargs["thread_ts"] = None
         slack_blockkit.post_message_with_response(**message_kwargs)
 

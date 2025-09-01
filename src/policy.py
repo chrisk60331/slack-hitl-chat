@@ -158,7 +158,9 @@ class PolicyEngine:
     """
 
     def __init__(
-        self, policy_path: str | None = None, rules: list[PolicyRule] | None = None
+        self,
+        policy_path: str | None = None,
+        rules: list[PolicyRule] | None = None,
     ) -> None:
         self._policy_path = policy_path or os.getenv("POLICY_PATH")
         self._custom_rules = rules

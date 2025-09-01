@@ -124,5 +124,3 @@ def put_policies(rules: Iterable[PolicyRule]) -> None:
         "rules": [r.model_dump() for r in rules],
     }
     table.put_item(Item=payload)
-
-

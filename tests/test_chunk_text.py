@@ -1,4 +1,3 @@
-
 from src.completion_notifier import _chunk_text
 
 

@@ -154,7 +154,9 @@ def migrate_config_cmd(dry_run: bool, include: str) -> None:
         click.echo("Dry run complete (no writes performed)")
 
     if not migrated_any and not dry_run:
-        click.echo("Nothing migrated. Check --include selection or source data.")
+        click.echo(
+            "Nothing migrated. Check --include selection or source data."
+        )
 
 
 if __name__ == "__main__":

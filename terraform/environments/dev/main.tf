@@ -132,6 +132,7 @@ module "execute_lambda" {
   
   environment_variables = {
     TABLE_NAME          = module.dynamodb.approval_log_table_name
+    CONFIG_TABLE_NAME   = module.dynamodb.config_table_name
     GOOGLE_TOKEN_JSON   = var.google_token_json
     MCP_AUTH_TOKEN      = var.mcp_auth_token
     MCP_HOST           = var.mcp_host

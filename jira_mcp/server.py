@@ -80,6 +80,266 @@ def _jira_client():
     )
 
 
+class ListIssuesRequest(BaseModel):
+    """Request model for listing Jira issues using JQL or simple filters.
+
+    Attributes:
+        jql: Optional raw JQL to use. When provided, other filters are ignored.
+        projectKey: Optional project key to scope results, e.g., "ENG".
+        issueType: Optional issue type filter, e.g., "Bug", "Task", "Story".
+        status: Optional status filter, e.g., "To Do", "In Progress", "Done".
+        assigneeEmail: Optional assignee email filter.
+        reporterEmail: Optional reporter email filter.
+        labels: Optional list of label names to require (matches any).
+        fields: Optional list of field names to return; defaults to common fields.
+        startAt: Pagination start index.
+        maxResults: Maximum number of results to return.
+        orderBy: Optional JQL ORDER BY clause (e.g., "-created", "priority DESC").
+    """
+
+    jql: str | None = None
+    projectKey: str | None = None
+    issueType: str | None = None
+    status: str | None = None
+    assigneeEmail: str | None = None
+    reporterEmail: str | None = None
+    labels: list[str] | None = None
+    fields: list[str] | None = None
+    startAt: int = 0
+    maxResults: int = 50
+    orderBy: str | None = None
+
+
+def _escape_jql_value(value: str) -> str:
+    """Escape a string value for safe inclusion in JQL quoted literals."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _build_list_issues_jql(request: ListIssuesRequest) -> str:
+    """Build a JQL string from ListIssuesRequest simple filters.
+
+    If request.jql is provided, returns it as-is (trimmed).
+    """
+    if request.jql and request.jql.strip():
+        base = request.jql.strip()
+    else:
+        clauses: list[str] = []
+        if request.projectKey:
+            clauses.append(f"project = {request.projectKey}")
+        if request.issueType:
+            v = _escape_jql_value(request.issueType)
+            clauses.append(f'issuetype = "{v}"')
+        if request.status:
+            v = _escape_jql_value(request.status)
+            clauses.append(f'status = "{v}"')
+        if request.assigneeEmail:
+            v = _escape_jql_value(request.assigneeEmail)
+            clauses.append(f'assignee = "{v}"')
+        if request.reporterEmail:
+            v = _escape_jql_value(request.reporterEmail)
+            clauses.append(f'reporter = "{v}"')
+        if request.labels:
+            label_values = ", ".join(
+                [f'"{_escape_jql_value(lbl)}"' for lbl in request.labels]
+            )
+            if label_values:
+                clauses.append(f"labels in ({label_values})")
+        base = " AND ".join(clauses) if clauses else ""
+    if request.orderBy and request.orderBy.strip():
+        # Allow leading '-' shorthand for DESC on a single field
+        order = request.orderBy.strip()
+        if order.startswith("-") and " " not in order:
+            order = f"{order[1:]} DESC"
+        base = f"{base} ORDER BY {order}".strip()
+    return base or "order by created DESC"
+
+
+def _extract_simple_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Extract a simple subset of Jira fields into flattened values.
+
+    Always attempts to include summary, status, issuetype, assignee, reporter, priority.
+    Missing fields are omitted.
+    """
+    result: dict[str, Any] = {}
+    if "summary" in fields and fields["summary"] is not None:
+        result["summary"] = fields["summary"]
+    status = fields.get("status") or {}
+    if isinstance(status, dict) and status.get("name"):
+        result["status"] = status.get("name")
+    issuetype = fields.get("issuetype") or {}
+    if isinstance(issuetype, dict) and issuetype.get("name"):
+        result["issuetype"] = issuetype.get("name")
+    assignee = fields.get("assignee") or {}
+    if isinstance(assignee, dict):
+        email = assignee.get("emailAddress")
+        display = assignee.get("displayName")
+        if email or display:
+            result["assignee"] = email or display
+    reporter = fields.get("reporter") or {}
+    if isinstance(reporter, dict):
+        email = reporter.get("emailAddress")
+        display = reporter.get("displayName")
+        if email or display:
+            result["reporter"] = email or display
+    priority = fields.get("priority") or {}
+    if isinstance(priority, dict) and priority.get("name"):
+        result["priority"] = priority.get("name")
+    return result
+
+
+@mcp.tool(
+    name="list_issues",
+    description="List Jira issues using JQL or simple filters (projectKey, issueType, status, assigneeEmail, reporterEmail, labels). Returns keys and selected fields.",
+)
+def list_issues(request: ListIssuesRequest) -> dict[str, Any]:
+    """List Jira issues.
+
+    Builds a JQL query from the provided filters (or uses the raw JQL), queries the
+    Jira Cloud search API, and returns a concise list of issue summaries with
+    pagination metadata.
+    """
+    jira = _jira_client()
+    jql = _build_list_issues_jql(request)
+
+    # Default fields if none provided
+    field_list = request.fields or [
+        "summary",
+        "status",
+        "issuetype",
+        "assignee",
+        "reporter",
+        "priority",
+        "created",
+        "updated",
+    ]
+
+    headers = {"Accept": "application/json"}
+    params = {
+        "jql": jql,
+        "fields": ",".join(field_list),
+        "startAt": max(0, int(request.startAt)),
+        "maxResults": max(1, int(request.maxResults)),
+    }
+
+    # Prefer the modern endpoint path used elsewhere in this module
+    url = jira._get_url("search/jql")
+    resp = jira._session.get(url, params=params, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+
+    issues_out: list[dict[str, Any]] = []
+    for item in data.get("issues", []) or []:
+        key = item.get("key")
+        fields_obj = item.get("fields", {}) or {}
+        entry: dict[str, Any] = {"key": key}
+        entry.update(_extract_simple_fields(fields_obj))
+        issues_out.append(entry)
+
+    return {
+        "jql": jql,
+        "startAt": data.get("startAt", request.startAt),
+        "maxResults": data.get("maxResults", request.maxResults),
+        "total": data.get("total", len(issues_out)),
+        "issues": issues_out,
+    }
+
+
+class LookupProjectKeyRequest(BaseModel):
+    """Request to look up a Jira project key by project name.
+
+    Attributes:
+        name: Project name to search for.
+        maxResults: Maximum projects to fetch from the API (when using search endpoint).
+    """
+
+    name: str = Field(min_length=1)
+    maxResults: int = 50
+
+
+def _select_best_project_match(
+    name: str, projects: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Select the best matching project by name using simple heuristics.
+
+    Priority:
+    1) Case-insensitive exact match on name
+    2) Case-insensitive startswith
+    3) Case-insensitive substring
+    4) Fallback to the first project
+    """
+    target = name.strip().lower()
+    if not projects:
+        return None
+
+    def norm(n: str | None) -> str:
+        return (n or "").strip().lower()
+
+    exact = [p for p in projects if norm(p.get("name")) == target]
+    if exact:
+        return exact[0]
+    starts = [p for p in projects if norm(p.get("name")).startswith(target)]
+    if starts:
+        return starts[0]
+    contains = [p for p in projects if target in norm(p.get("name"))]
+    if contains:
+        return contains[0]
+    return projects[0]
+
+
+@mcp.tool(
+    name="lookup_project_key",
+    description="Look up a Jira project key by project name using the project search API.",
+)
+def lookup_project_key(request: LookupProjectKeyRequest) -> dict[str, Any]:
+    """Return the best-match Jira project key given a project name.
+
+    Uses /rest/api/3/project/search when available, falling back to listing all
+    projects if needed. Returns the matched project's key, id, and name.
+    """
+    jira = _jira_client()
+
+    # Prefer project search API
+    search_url = jira._get_url("project/search")
+    resp = jira._session.get(
+        search_url,
+        params={
+            "query": request.name,
+            "maxResults": max(1, int(request.maxResults)),
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    projects: list[dict[str, Any]] = []
+    if resp.ok:
+        try:
+            payload = resp.json() or {}
+            projects = payload.get("values", []) or []
+        except Exception:
+            projects = []
+    else:
+        # Fallback to legacy list endpoint
+        list_url = jira._get_url("project")
+        alt = jira._session.get(
+            list_url, headers={"Accept": "application/json"}
+        )
+        if alt.ok:
+            try:
+                projects = alt.json() or []
+            except Exception:
+                projects = []
+
+    match = _select_best_project_match(request.name, projects)
+    if not match:
+        return {"found": False, "reason": "no_projects_visible"}
+
+    return {
+        "found": True,
+        "projectKey": match.get("key"),
+        "projectId": match.get("id"),
+        "name": match.get("name"),
+    }
+
+
 class CreateProjectRequest(BaseModel):
     name: str
     key: str

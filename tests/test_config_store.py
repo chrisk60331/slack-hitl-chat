@@ -38,12 +38,16 @@ def _ensure_table() -> None:
             endpoint_url=os.environ.get("DYNAMODB_LOCAL_ENDPOINT"),
             region_name=os.environ.get("AWS_REGION", "us-east-1"),
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+            aws_secret_access_key=os.environ.get(
+                "AWS_SECRET_ACCESS_KEY", "test"
+            ),
         )
         dynamodb.create_table(
             TableName=os.environ["CONFIG_TABLE_NAME"],
             BillingMode="PAY_PER_REQUEST",
-            AttributeDefinitions=[{"AttributeName": "config_key", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "config_key", "AttributeType": "S"}
+            ],
             KeySchema=[{"AttributeName": "config_key", "KeyType": "HASH"}],
         )
 
@@ -71,5 +75,3 @@ def test_put_and_get_policies() -> None:
     cfg = get_policies()
     assert len(cfg.rules) == 1
     assert cfg.rules[0].name == "require_aws_role"
-
-

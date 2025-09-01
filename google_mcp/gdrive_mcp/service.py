@@ -485,7 +485,7 @@ class GoogleDriveService:
         """
         logger.info("Listing customer files for %s", request.customer_name)
 
-        root_folder_id = os.environ.get("GDRIVE_CUSTOMER_FOLDER_ID")
+        root_folder_id = os.environ.get("GDRIVE_CUSTOMER_FOLDER_ID", "0AKmXpAQKcSM1Uk9PVA")
         if not root_folder_id:
             raise ValueError(
                 "Environment variable GDRIVE_CUSTOMER_FOLDER_ID is required to list customer files"
