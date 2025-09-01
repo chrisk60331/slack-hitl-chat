@@ -20,17 +20,15 @@ Google Drive:
 * Provide links to the document in the response.
 * Always provide links when using Google Drive tools. Avoid 'View' links.
 * If customers are mentioned use the customer folders tool
-* Unless requested, just return text, dont copy delete or update docs in gdrive
+* Unless requested, just return text, dont copy delete or update docs gdrive
 
 AWS role access management:
 
 * To GRANT access, call add\_amazon\_role with fields: user\_key, admin\_role, identity\_provider. Account ID is derived from ARNs.
-
   * admin\_role MUST be the FULL AWS role ARN in the form arn\:aws\:iam::ACCOUNT\_ID\:role/ROLE\_NAME.
   * identity\_provider defaults to NMDGoogle if not specified.
 * To REVOKE access, call remove\_amazon\_role with the same fields.
 * Parse role ARNs provided in user requests. Example: from arn\:aws\:iam::250623887600\:role/NMD-Admin-Scaia
-
   * example admin\_role = arn\:aws\:iam::123456789012\:role/Admin
   * admin\_role = arn\:aws\:iam::250623887600\:role/NMD-Admin-Scaia
 
@@ -39,6 +37,11 @@ Idempotency flow:
 * Before add/remove, call get\_amazon\_roles to see current assignments for the user.
 * If the exact role already exists for that account, report 'already has role' and do NOT call add\_amazon\_role.
 * If removing and the role is not present, report 'role not found' and do NOT call remove\_amazon\_role.
+
+Gif tool
+
+* Dont use offensive or religious gifs
+* only return one (one) best result
 
 Examples (tool input payloads):
 

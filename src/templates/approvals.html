@@ -2,45 +2,202 @@
 <html>
   <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <script src="https://cdn.tailwindcss.com"></script>
     <title>Approvals Audit</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
       .table-wrap { width: 100%; overflow-x: auto; }
-      table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      table { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; }
       th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
       th { background: #f6f6f6; text-align: left; }
       code { font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+      thead th { position: relative; }
+      .col-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
+      .dragging { user-select: none; }
+      thead th.sortable { cursor: pointer; }
     </style>
   </head>
-  <body>
-    <h1>Approvals Audit</h1>
-    <p><a href="/">Back</a></p>
-    <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Request ID</th>
-          <th>Status</th>
-          <th>Timestamp</th>
-          <th>proposed_action</th>
-          <th>completion_message</th>
-          <th>approver</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-        <tr>
-          <td><code>{{ item.request_id }}</code></td>
-          <td>{{ item.approval_status }}</td>
-          <td>{{ item.timestamp }}</td>
-          <td>{{ item.proposed_action }}</td>
-          <td>{{ item.completion_message }}</td>
-          <td>{{ item.approver }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <body class="min-h-screen bg-gray-50 text-gray-900 p-8">
+    <div class="max-w-7xl mx-auto">
+      <h1 class="text-3xl font-bold mb-2">Approvals Audit</h1>
+      <p class="mb-4">
+        <a class="inline-flex items-center text-sm text-gray-600 hover:text-gray-900" href="{{ url_for('index') }}">
+          <span class="mr-1">←</span> Back
+        </a>
+      </p>
+      <div class="rounded-2xl bg-white p-0 shadow overflow-hidden">
+        <div class="px-4 pt-4 pb-2 border-b border-gray-100 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+          <div class="flex items-center gap-2">
+            <label for="filter-search" class="text-sm text-gray-600">Search</label>
+            <input id="filter-search" type="text" placeholder="Find text..." class="w-64 border border-gray-300 rounded-md px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="filter-status" class="text-sm text-gray-600">Status</label>
+            <select id="filter-status" class="border border-gray-300 rounded-md px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+              <option value="">All</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+        <table class="min-w-full table-fixed rounded-xl overflow-hidden">
+          <thead>
+            <tr class="bg-gray-50">
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>Request ID</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>Status</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="date"><span>Timestamp</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>proposed_action</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>completion_message</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>approver</span> <span class="sort-indicator"></span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td class="p-2"><code>{{ item.request_id }}</code></td>
+              <td class="p-2">{{ item.approval_status }}</td>
+              <td class="p-2">{{ item.timestamp }}</td>
+              <td class="p-2">{{ item.proposed_action }}</td>
+              <td class="p-2">{{ item.completion_message }}</td>
+              <td class="p-2">{{ item.approver }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
     </div>
+    <script>
+      // Filtering and sorting logic
+      (function() {
+        const table = document.querySelector('table');
+        const tbody = table.querySelector('tbody');
+        const searchInput = document.getElementById('filter-search');
+        const statusSelect = document.getElementById('filter-status');
+        const headers = table.querySelectorAll('thead th');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        // Build status options from existing rows
+        const statusSet = new Set();
+        rows.forEach(r => {
+          const statusCell = r.cells[1];
+          if (statusCell) statusSet.add(statusCell.textContent.trim());
+        });
+        const frag = document.createDocumentFragment();
+        Array.from(statusSet).sort().forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s || '(empty)';
+          frag.appendChild(opt);
+        });
+        statusSelect && statusSelect.appendChild(frag);
+
+        let sortState = { index: 2, dir: 'desc' }; // default sort by timestamp desc
+
+        function parseByType(text, type) {
+          if (type === 'date') {
+            const t = Date.parse(text);
+            return isNaN(t) ? 0 : t;
+          }
+          return (text || '').toLowerCase();
+        }
+
+        function apply() {
+          const query = (searchInput?.value || '').toLowerCase();
+          const statusFilter = statusSelect?.value || '';
+
+          const filtered = rows.filter(r => {
+            const cellsText = Array.from(r.cells).map(c => c.textContent.toLowerCase()).join(' ');
+            const status = r.cells[1]?.textContent.trim() || '';
+            const matchesQuery = !query || cellsText.includes(query);
+            const matchesStatus = !statusFilter || status === statusFilter;
+            return matchesQuery && matchesStatus;
+          });
+
+          const type = headers[sortState.index]?.dataset.type || 'string';
+          filtered.sort((a, b) => {
+            const av = parseByType(a.cells[sortState.index]?.textContent.trim() || '', type);
+            const bv = parseByType(b.cells[sortState.index]?.textContent.trim() || '', type);
+            if (av < bv) return sortState.dir === 'asc' ? -1 : 1;
+            if (av > bv) return sortState.dir === 'asc' ? 1 : -1;
+            return 0;
+          });
+
+          // Re-render
+          tbody.innerHTML = '';
+          const frag = document.createDocumentFragment();
+          filtered.forEach(r => frag.appendChild(r));
+          tbody.appendChild(frag);
+        }
+
+        searchInput?.addEventListener('input', apply);
+        statusSelect?.addEventListener('change', apply);
+
+        headers.forEach((th, idx) => {
+          th.addEventListener('click', () => {
+            if (!th.classList.contains('sortable')) return;
+            if (sortState.index === idx) {
+              sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              sortState = { index: idx, dir: 'asc' };
+            }
+            apply();
+          });
+        });
+
+        // Initial render
+        apply();
+      })();
+
+      // Column resize logic (unchanged)
+      (function() {
+        const table = document.querySelector('table');
+        if (!table) return;
+        const headers = table.querySelectorAll('thead th');
+
+        headers.forEach((th, index) => {
+          const resizer = document.createElement('div');
+          resizer.className = 'col-resizer';
+          th.appendChild(resizer);
+
+          let startX = 0;
+          let startWidth = 0;
+
+          const onMouseMove = (e) => {
+            const dx = e.pageX - startX;
+            const newWidth = Math.max(80, startWidth + dx);
+            setColumnWidth(index, newWidth);
+          };
+
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.classList.remove('dragging');
+          };
+
+          resizer.addEventListener('mousedown', (e) => {
+            startX = e.pageX;
+            startWidth = th.offsetWidth;
+            document.body.classList.add('dragging');
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            e.preventDefault();
+          });
+        });
+
+        function setColumnWidth(colIndex, px) {
+          // Apply fixed pixel width to header and all body cells for the column
+          for (const row of table.rows) {
+            const cell = row.cells[colIndex];
+            if (cell) {
+              cell.style.width = px + 'px';
+              cell.style.minWidth = px + 'px';
+              cell.style.maxWidth = px + 'px';
+            }
+          }
+        }
+      })();
+    </script>
   </body>
   </html>
 

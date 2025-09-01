@@ -111,32 +111,35 @@ async def put_policy_rules(
 
 @app.get("/audit/approvals")
 async def list_approvals(limit: int = 50) -> dict[str, list[dict[str, Any]]]:
-    """Return recent approvals from DynamoDB (StatusIndex by timestamp)."""
+    """Return recent approvals by scanning and sorting by creation timestamp."""
     table = get_approval_table()
 
-    # Fallback to scan if GSI names differ; use conservative limit
-    try:
-        resp = table.query(
-            IndexName="TimestampIndex",
-            KeyConditionExpression="#ts >= :min",
-            ExpressionAttributeNames={"#ts": "timestamp"},
-            ExpressionAttributeValues={":min": ""},
-            ScanIndexForward=False,
-            Limit=limit,
-        )
-        items = resp.get("Items", [])
-    except Exception:
-        resp = table.scan(Limit=limit)
-        items = resp.get("Items", [])
-    # Ensure descending order by timestamp for consumers
-    try:
-        items = sorted(
-            items,
-            key=lambda d: d.get("timestamp", ""),
-            reverse=True,
-        )
-    except Exception:
-        pass
+    # Paginated scan, gather a buffer larger than limit to ensure recency
+    items: list[dict[str, Any]] = []
+    start_key: dict[str, Any] | None = None
+    max_scan: int = max(limit * 5, 100)
+    while True:
+        scan_kwargs: dict[str, Any] = {"Limit": min(200, max_scan)}
+        if start_key:
+            scan_kwargs["ExclusiveStartKey"] = start_key
+        resp = table.scan(**scan_kwargs)
+        items.extend(resp.get("Items", []))
+        start_key = resp.get("LastEvaluatedKey")
+        if not start_key or len(items) >= max_scan:
+            break
+
+    def _ts_key(d: dict[str, Any]) -> float:
+        ts = d.get("timestamp", "")
+        try:
+            # Normalize Z to +00:00 for Python fromisoformat
+            from datetime import datetime
+
+            norm = ts.replace("Z", "+00:00")
+            return datetime.fromisoformat(norm).timestamp()
+        except Exception:
+            return 0.0
+
+    items = sorted(items, key=_ts_key, reverse=True)[:limit]
     return {"items": items}
 
 

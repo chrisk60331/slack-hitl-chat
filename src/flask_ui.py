@@ -133,28 +133,31 @@ def create_app() -> Flask:
     def approvals() -> str:
         limit = int(request.args.get("limit", "50"))
         table = get_approval_table()
-        try:
-            resp = table.query(
-                IndexName="TimestampIndex",
-                KeyConditionExpression="#ts >= :min",
-                ExpressionAttributeNames={"#ts": "timestamp"},
-                ExpressionAttributeValues={":min": ""},
-                ScanIndexForward=False,
-                Limit=limit,
-            )
-            items = resp.get("Items", [])
-        except Exception:
-            resp = table.scan(Limit=limit)
-            items = resp.get("Items", [])
-        # Ensure client receives items sorted by most recent first
-        try:
-            items = sorted(
-                items,
-                key=lambda d: d.get("timestamp", ""),
-                reverse=True,
-            )
-        except Exception:
-            pass
+        # Paginated scan and sort by creation timestamp (desc)
+        items: list[dict[str, Any]] = []
+        start_key: dict[str, Any] | None = None
+        max_scan: int = max(limit * 5, 100)
+        while True:
+            scan_kwargs: dict[str, Any] = {"Limit": min(200, max_scan)}
+            if start_key:
+                scan_kwargs["ExclusiveStartKey"] = start_key
+            resp = table.scan(**scan_kwargs)
+            items.extend(resp.get("Items", []))
+            start_key = resp.get("LastEvaluatedKey")
+            if not start_key or len(items) >= max_scan:
+                break
+
+        def _ts_key(d: dict[str, Any]) -> float:
+            ts = d.get("timestamp", "")
+            try:
+                from datetime import datetime
+
+                norm = ts.replace("Z", "+00:00")
+                return datetime.fromisoformat(norm).timestamp()
+            except Exception:
+                return 0.0
+
+        items = sorted(items, key=_ts_key, reverse=True)[:limit]
         return render_template("approvals.html", items=items)
 
     return app

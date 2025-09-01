@@ -28,3 +28,30 @@ uv run hitl-mcp run --user-id <your email here> --environment dev --query "<your
 ```bash
 uv run pytest -q
 ```
+
+### Styling (Tailwind CSS)
+
+For the lightweight Admin templates under `src/templates`, Tailwind CSS is included via the Play CDN for simplicity. No build step is required.
+
+- Added to each template `<head>`:
+  - `<meta name="viewport" content="width=device-width, initial-scale=1"/>`
+  - `<script src="https://cdn.tailwindcss.com"></script>`
+- Minimal classes (e.g., `class="min-h-screen bg-gray-50 text-gray-900 p-8"`) were applied to bodies.
+
+Note: For production-hardening or custom design tokens, replace the CDN with a proper Tailwind build (CLI or PostCSS) and a base layout to avoid duplication across templates.
+
+Landing page was refreshed with a Tailwind hero and navigation cards in `src/templates/index.html`. Subpages (`servers.html`, `policies.html`, `approvals.html`) are styled with Tailwind wrappers, tables, and controls. The approvals table supports column resizing with a minimal inline script.
+
+Approvals page enhancements:
+- Client-side search (free text) and status filter
+- Click-to-sort on any header (timestamp sorts by date)
+
+### Admin UI: Approvals table column resizing
+
+The Approvals page (`src/templates/approvals.html`) supports mouse-based column resizing:
+
+- Hover near the right edge of a column header until the resize cursor appears, then drag.
+- The width applies to the header and corresponding body cells.
+- Minimum width is constrained to 80px to maintain readability.
+
+This is implemented with a minimal inline JS script and does not require external dependencies.

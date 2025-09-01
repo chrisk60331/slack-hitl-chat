@@ -2,6 +2,8 @@
 <html>
   <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <script src="https://cdn.tailwindcss.com"></script>
     <title>Policies</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
@@ -11,50 +13,51 @@
       input[type=text] { width: 100%; }
     </style>
   </head>
-  <body>
-    <h1>Policies</h1>
+  <body class="min-h-screen bg-gray-50 text-gray-900 p-8">
+    <div class="max-w-6xl mx-auto">
+      <h1 class="text-3xl font-bold mb-6">Policies</h1>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <ul>
+        <ul class="mb-4">
           {% for category, message in messages %}
-            <li>{{ message }}</li>
+            <li class="text-sm text-green-700">{{ message }}</li>
           {% endfor %}
         </ul>
       {% endif %}
     {% endwith %}
-    <form method="post">
-      <table>
+    <form method="post" class="rounded-2xl bg-white p-6 shadow">
+      <table class="min-w-full table-auto">
         <thead>
-          <tr>
-            <th>Name</th>
-            <th>Categories (comma sep)</th>
-       
-            <th>Require Approval</th>
-            <th>Deny</th>
+          <tr class="bg-gray-50">
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Name</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Categories (comma sep)</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Require Approval</th>
+            <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Deny</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rules %}
           <tr>
-            <td><input type="text" name="name" value="{{ r.name }}"/></td>
-            <td><input type="text" name="categories" value="{{ ','.join(r.categories) }}"/></td>
-            <td><input type="checkbox" name="require_approval_{{ loop.index0 }}" {% if r.require_approval %}checked{% endif %}/></td>
-            <td><input type="checkbox" name="deny_{{ loop.index0 }}" {% if r.deny %}checked{% endif %}/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="name" value="{{ r.name }}"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="categories" value="{{ ','.join(r.categories) }}"/></td>
+            <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="require_approval_{{ loop.index0 }}" {% if r.require_approval %}checked{% endif %}/></td>
+            <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="deny_{{ loop.index0 }}" {% if r.deny %}checked{% endif %}/></td>
           </tr>
           {% endfor %}
           <tr>
-            <td><input type="text" name="name" placeholder="rule name"/></td>
-            <td><input type="text" name="categories" placeholder="aws_role_access,..."/></td>
-            <td><input type="checkbox" name="require_approval_{{ rules|length }}"/></td>
-            <td><input type="checkbox" name="deny_{{ rules|length }}"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="name" placeholder="rule name"/></td>
+            <td class="p-2"><input class="w-full border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500 outline-none" type="text" name="categories" placeholder="aws_role_access,..."/></td>
+            <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="require_approval_{{ rules|length }}"/></td>
+            <td class="p-2"><input class="h-4 w-4 text-indigo-600" type="checkbox" name="deny_{{ rules|length }}"/></td>
           </tr>
         </tbody>
       </table>
-      <div class="actions">
-        <button type="submit">Save</button>
-        <a href="/">Back</a>
+      <div class="actions mt-4">
+        <button type="submit" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">Save</button>
+        <a class="ml-3 text-gray-600 hover:text-gray-800" href="{{ url_for('index') }}">Back</a>
       </div>
     </form>
+    </div>
   </body>
   </html>
 

@@ -281,9 +281,6 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
     if decision.reason:
         approval_item.reason = decision.reason
 
-    # Update timestamp for the decision
-    approval_item.timestamp = datetime.now(UTC).isoformat()
-
     # Save updated item to DynamoDB
     get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
 
