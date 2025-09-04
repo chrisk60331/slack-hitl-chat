@@ -80,6 +80,10 @@ class ProposedAction(BaseModel):
     user_id: str | None = Field(default=None)
     group_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Optional list of fully-qualified tool ids (e.g., "google__users_lookup")
+    # that the agent expects to use for this action. When present, policy rules
+    # with tool filters can gate based on these values.
+    intended_tools: list[str] = Field(default_factory=list)
 
 
 class PolicyRule(BaseModel):
@@ -93,6 +97,10 @@ class PolicyRule(BaseModel):
     max_amount: float | None = None
     require_approval: bool = True
     deny: bool = False
+    # Optional list of fully-qualified tool ids that this rule targets. If
+    # provided, the rule matches only when the action references one of these
+    # tools either via action.tool_name or action.intended_tools.
+    tools: list[str] = Field(default_factory=list)
 
     def matches(self, action: ProposedAction) -> bool:
         """Return True if this rule applies to the given action."""
@@ -105,6 +113,15 @@ class PolicyRule(BaseModel):
             if not any(
                 action.resource.startswith(p) for p in self.resource_prefixes
             ):
+                return False
+        # If tools are specified on the rule, require a match either by exact
+        # action.tool_name or any in action.intended_tools.
+        if self.tools:
+            tool_hits = set()
+            if action.tool_name:
+                tool_hits.add(action.tool_name)
+            tool_hits.update(action.intended_tools or [])
+            if not any(t in self.tools for t in tool_hits):
                 return False
         if (
             self.min_amount is not None
@@ -140,6 +157,11 @@ DEFAULT_RULES: list[PolicyRule] = [
     ),
     PolicyRule(
         name="require_approval_for_user_google_account_maintenance",
+        categories=[ApprovalCategory.USER_ACCOUNT_ACCESS],
+        require_approval=True,
+    ),
+    PolicyRule(
+        name="require_approval_for_user_google_workspace_maintenance",
         categories=[ApprovalCategory.USER_ACCOUNT_ACCESS],
         require_approval=True,
     ),
@@ -229,6 +251,26 @@ def infer_category_and_resource(
         Tuple of (ApprovalCategory, resource string or None)
     """
     match = _AWS_ROLE_ARN_REGEX.search(description or "")
-    if match:
-        return (ApprovalCategory.AWS_ROLE_ACCESS, match.group(0))
-    return (ApprovalCategory.OTHER, None)
+    if match or re.search(r"aws", description, re.IGNORECASE):
+        if match := re.search(r"\b(grant)|(add)", description, re.IGNORECASE):
+            return (ApprovalCategory.AWS_ROLE_ACCESS, "google_admin__add_amazon_role")
+        elif match := re.search(r"\b(revoke)|(remove)", description, re.IGNORECASE):
+            return (ApprovalCategory.AWS_ROLE_ACCESS, "google_admin__remove_amazon_role")
+        elif match := re.search(r"\b(list)|(get)|(describe)|(lookup)", description, re.IGNORECASE):
+            return (ApprovalCategory.OTHER, "google_admin__get_amazon_roles")
+    if re.search(
+        r"google", description, re.IGNORECASE
+    ) and re.search(
+        r"(workspace)|(admin)|(user)|(account)", description, re.IGNORECASE
+    ):
+        if match := re.search(r"\b(suspend)|(disable)(terminate)", description, re.IGNORECASE):
+            return (ApprovalCategory.USER_ACCOUNT_ACCESS, f"google_admin__suspend_user")
+        elif match := re.search(r"\b(unsuspend)|(enable)|(restore)|(resume)", description, re.IGNORECASE):
+            return (ApprovalCategory.USER_ACCOUNT_ACCESS, f"google_admin__unsuspend_user")
+        elif match := re.search(r"\b(add)|(create)", description, re.IGNORECASE):
+            return (ApprovalCategory.USER_ACCOUNT_ACCESS, f"google_admin__add_user")
+        elif match := re.search(r"\b(get)|(describe)|(lookup)", description, re.IGNORECASE):
+            return (ApprovalCategory.OTHER, "google_admin__get_user") 
+        elif match := re.search(r"\b(list)", description, re.IGNORECASE):
+            return (ApprovalCategory.OTHER, "google_admin__list_users")
+    return (ApprovalCategory.OTHER, "Any")

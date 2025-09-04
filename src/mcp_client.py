@@ -2,10 +2,10 @@
 
 import asyncio
 import json
-import shutil
 import logging
 import os
 import random
+import shutil
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AsyncExitStack
@@ -17,13 +17,14 @@ from botocore.config import Config as BotoConfig
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from .config_store import get_mcp_servers, MCPServer
+from .config_store import MCPServer, get_mcp_servers
 
 # load_dotenv()  # load environment variables from .env
 MAX_ITERATIONS = 20  # Increased limit for complex operations
 MAX_TOKENS = 4095
 # Set up logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
 
 
 # System instructions to guide tool usage, especially AWS role add/remove
@@ -33,13 +34,14 @@ SYSTEM_PROMPT_PATH: str = os.path.join(
 try:
     with open(SYSTEM_PROMPT_PATH, encoding="utf-8") as _f:
         SYSTEM_PROMPT: str = _f.read()
+
 except FileNotFoundError:
     # Fallback to an empty prompt if the file is missing to avoid crashes
     SYSTEM_PROMPT = ""
     raise ValueError("SYSTEM_PROMPT_PATH not found")
 
 
-async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
+async def invoke_mcp_client(query: str, requester_email: str = None, allowed_tools: list[str] = None) -> str:
     client = MCPClient()
     try:
         alias_to_path: dict[str, str] = {}
@@ -55,6 +57,8 @@ async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
                         alias_to_path[s.alias] = s.path
                     if getattr(s, "disabled_tools", None):
                         disabled_map[s.alias] = list(s.disabled_tools)
+            if allowed_tools:
+                client.allowed_tools_fq = set(allowed_tools)
             if disabled_map:
                 client.set_disabled_tools_map(disabled_map)
         except Exception as e:
@@ -65,9 +69,10 @@ async def invoke_mcp_client(query: str, requester_email: str = None) -> str:
                 alias_to_path if alias_to_path else None,
                 requester_email,
                 servers_cfg=servers_cfg_list,
+                allowed_tools=allowed_tools,
             )
 
-        response_text = await client.process_query(query, requester_email)
+        response_text = await client.process_query(query, requester_email, allowed_tools)
     finally:
         await client.cleanup()
 
@@ -101,6 +106,7 @@ class MCPClient:
         self.tool_registry: dict[str, tuple[str, str]] = {}
         # Per-alias set of disabled tool short-names (no alias prefix)
         self.disabled_tools_by_alias: dict[str, set[str]] = {}
+    
 
     def set_disabled_tools_map(
         self, mapping: dict[str, list[str]] | dict[str, set[str]]
@@ -117,10 +123,19 @@ class MCPClient:
             normalized[alias] = {n.split("__", 1)[-1] for n in disabled_set}
         self.disabled_tools_by_alias = normalized
 
-    def is_tool_allowed(self, alias: str, short_name: str) -> bool:
+    def is_tool_allowed(self, alias: str, short_name: str, allowed_tools: list[str]) -> bool:
         """Return True if the tool is not disabled for the given alias."""
         disabled = self.disabled_tools_by_alias.get(alias, set())
-        return short_name not in disabled
+        if "Any" in allowed_tools:
+            logging.info(f"Tool {short_name} is allowed for alias {alias} and allowed tools: {allowed_tools}")
+            return True
+        if short_name in disabled:
+            logging.info(f"Tool {short_name} is disabled for alias {alias}")
+            return False
+        if f"{alias}__{short_name}" not in allowed_tools:
+            logging.info(f"Tool {short_name} is not allowed for alias {alias} and allowed tools: {allowed_tools}")
+            return False
+        return True
 
     def _is_retryable_bedrock_error(self, exc: Exception) -> bool:
         """Return True if the exception is a transient/retryable Bedrock
@@ -318,6 +333,7 @@ class MCPClient:
         alias_to_path: dict[str, str] | None = None,
         requester_email: str | None = None,
         servers_cfg: list[MCPServer] | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> None:
         """Connect to multiple MCP servers and build a qualified tool registry.
 
@@ -335,6 +351,7 @@ class MCPClient:
                     args = list(s.args or [])
                     if requester_email:
                         args = args + [requester_email]
+
                     env = dict(s.env or {})
 
                     # If running via uvx in AWS Lambda, default cache dirs to /tmp
@@ -399,9 +416,10 @@ class MCPClient:
         for alias, command, args, env in launch_items:
             # Resolve command to absolute path if available (helps in Lambda where PATH may differ)
             resolved = shutil.which(command) or command
-            logger.info(
+            logger.error(
                 f"Connecting to server {resolved} {args} with requester email {requester_email}"
             )
+
             server_params = StdioServerParameters(
                 command=resolved,
                 args=args,
@@ -415,11 +433,11 @@ class MCPClient:
                     "script": " ".join(args),
                 },
             )
-    
+
             stdio_transport = await self.exit_stack.enter_async_context(
                 stdio_client(server_params)
             )
-            
+
             stdio, write = stdio_transport
             session = await self.exit_stack.enter_async_context(
                 ClientSession(stdio, write)
@@ -431,11 +449,12 @@ class MCPClient:
                     command=resolved,
                     args=[args[0]],
                     env=env or None,
+                    allowed_tools=allowed_tools,
                 )
                 stdio_transport = await self.exit_stack.enter_async_context(
                     stdio_client(server_params)
                 )
-                
+
                 stdio, write = stdio_transport
                 session = await self.exit_stack.enter_async_context(
                     ClientSession(stdio, write)
@@ -446,6 +465,8 @@ class MCPClient:
             response = await session.list_tools()
             for tool in response.tools:
                 qualified_name = f"{alias}__{tool.name}"
+                if qualified_name not in allowed_tools:
+                    continue
                 self.tool_registry[qualified_name] = (alias, tool.name)
             logger.info(
                 "mcp.connect.done",
@@ -453,7 +474,7 @@ class MCPClient:
             )
 
     async def process_query(
-        self, query: str, requester_email: str = None
+        self, query: str, requester_email: str = None, allowed_tools: list[str] = None
     ) -> str:
         """Process a query using Claude on Bedrock and available tools.
 
@@ -478,6 +499,7 @@ class MCPClient:
         # Discover tools from either single session or multi-sessions
         available_tools: list[dict[str, Any]] = []
         if self.sessions:
+            logger.error(f"Allowed tools: {allowed_tools}")
             for _qualified, (_alias, _tname) in self.tool_registry.items():
                 # We cannot fetch input schema here without another call; rely on list_tools per session
                 # Build available tools by querying each session once
@@ -487,7 +509,7 @@ class MCPClient:
                 tools_resp = await session.list_tools()
                 for tool in tools_resp.tools:
                     short_name = tool.name
-                    if not self.is_tool_allowed(alias, short_name):
+                    if not self.is_tool_allowed(alias, short_name, allowed_tools):
                         continue
                     available_tools.append(
                         {
@@ -497,6 +519,7 @@ class MCPClient:
                         }
                     )
         else:
+            logger.info(f"Allowed tools: {allowed_tools}")
             response = await self.session.list_tools()
             available_tools = [
                 {
@@ -505,15 +528,22 @@ class MCPClient:
                     "input_schema": tool.inputSchema,
                 }
                 for tool in response.tools
+                if tool.name in allowed_tools
             ]
 
         iteration = 0
-
+        logger.info(f"Available tools: {available_tools}")
         while iteration < MAX_ITERATIONS:
             iteration += 1
             logger.info(
                 f"Starting conversation iteration {iteration}/{MAX_ITERATIONS}"
             )
+            if not available_tools:
+                assistant_content = "No tools available to call. You wont be able to complete the task."
+                messages.append(
+                    {"role": "assistant", "content": assistant_content},
+                )
+
 
             # Prepare request body for Bedrock
             request_body = {
@@ -525,11 +555,11 @@ class MCPClient:
             }
 
             # Claude API call via Bedrock
-            logger.debug(
+            logger.info(
                 f"Calling Claude with {len(messages)} messages and {len(available_tools)} tools"
             )
             response = self._invoke_with_retries(
-                model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                model_id=os.environ.get("BEDROCK_MODEL_ID"),
                 body=request_body,
             )
 
@@ -556,7 +586,6 @@ class MCPClient:
                     if content.get("type") == "text":
                         final_text.append(content.get("text", ""))
                 result = "\n".join(final_text).strip()
-
                 logger.info(
                     f"Conversation completed in {iteration} iterations"
                 )
@@ -571,7 +600,7 @@ class MCPClient:
                 tool_use_id = tool_content.get("id")
 
                 try:
-                    logger.info("mcp.tool.execute", extra={"name": tool_name})
+                    logger.error(f"mcp.tool.execute extra={tool_name}")
                     # Execute tool call
                     if self.sessions and "__" in tool_name:
                         alias, short_name = tool_name.split("__", 1)
@@ -580,7 +609,7 @@ class MCPClient:
                             raise ValueError(
                                 f"No MCP session for alias {alias}"
                             )
-                        if not self.is_tool_allowed(alias, short_name):
+                        if not self.is_tool_allowed(alias, short_name, allowed_tools):
                             raise ValueError(
                                 f"Tool '{short_name}' is disabled for alias '{alias}'"
                             )
@@ -594,7 +623,7 @@ class MCPClient:
 
                     tool_output = str(result.content)
 
-
+                    logger.error(f"Tool {tool_name} output: {tool_output}")
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -647,7 +676,7 @@ class MCPClient:
         }
 
         response = self._invoke_stream_with_retries(
-            model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            model_id=os.environ.get("BEDROCK_MODEL_ID"),
             body=request_body,
         )
 
@@ -759,7 +788,7 @@ class MCPClient:
             tool_input_buffer: list[str] = []
 
             response = self._invoke_stream_with_retries(
-                model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                model_id=os.environ.get("BEDROCK_MODEL_ID"),
                 body=request_body,
             )
             stream = response.get("body")
@@ -830,6 +859,7 @@ class MCPClient:
 
             # If there are tool calls, execute them and continue loop
             if pending_tool_calls:
+                print(f"Pending tool calls: {pending_tool_calls}")
                 tool_results_content: list[dict[str, Any]] = []
                 for call in pending_tool_calls:
                     yield {
@@ -843,20 +873,23 @@ class MCPClient:
                             alias, short_name = call["name"].split("__", 1)
                             target_session = self.sessions.get(alias)
                             if target_session is None:
+                                print(f"No MCP session for alias {alias}")
                                 raise ValueError(
                                     f"No MCP session for alias {alias}"
                                 )
+                            print(f"Calling session tool {short_name} with args {call['args']}")
                             if not self.is_tool_allowed(alias, short_name):
                                 raise ValueError(
-                                    f"Tool '{short_name}' is disabled for alias '{alias}'"
+                                    f"Tool '{short_name}' is not allowed for alias '{alias}'"
                                 )
                             result = await target_session.call_tool(
                                 short_name, call["args"]
                             )  # type: ignore[func-returns-value]
                         else:
-                            result = await self.session.call_tool(
-                                call["name"], call["args"]
-                            )  # type: ignore[func-returns-value]
+                            # When only a single session exists, the model may emit bare names.
+                            # If an allowlist is configured, reject bare names not present in it.
+                            print(f"Calling tool {call['name']} with args {call['args']}")
+                            result = await self.session.call_tool(call["name"], call["args"])  # type: ignore[func-returns-value]
                         content_str = str(result.content)
                         yield {
                             "type": "tool_result",

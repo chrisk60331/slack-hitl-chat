@@ -13,22 +13,29 @@ import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
+import logging
 
 import boto3
 from pydantic import BaseModel, Field
 
-from .approval_handler import ApprovalItem, get_approval_status
+from .approval_handler import (
+    ApprovalItem,
+    get_approval_status,
+    handle_new_approval_request,
+    compute_request_id_from_action,
+)
+from .config_store import get_policies
 from .mcp_client import invoke_mcp_client
 from .memory import ShortTermMemory
 from .policy import (
-    ApprovalCategory,
     ApprovalOutcome,
-    PolicyDecision,
     PolicyEngine,
     ProposedAction,
-    infer_category_and_resource,
 )
-from .config_store import get_policies, get_mcp_servers
+
+logging.basicConfig(
+    level=logging.INFO,
+)
 
 
 class OrchestratorRequest(BaseModel):
@@ -43,6 +50,8 @@ class OrchestratorRequest(BaseModel):
     environment: str = Field(
         default_factory=lambda: os.getenv("ENVIRONMENT", "dev")
     )
+    # Optional list of fully-qualified tool ids the agent expects to use
+    intended_tools: list[str] = Field(default_factory=list)
 
 
 class OrchestratorResult(BaseModel):
@@ -95,46 +104,26 @@ class AgentOrchestrator:
           then execute
         - If deny → return denied status
         """
-
-        # Infer category/resource when not provided
-        inferred_category: ApprovalCategory = ApprovalCategory.OTHER
-        inferred_resource: str | None = None
-        if not request.category or not request.resource:
-            inferred_category, inferred_resource = infer_category_and_resource(
-                request.query
-            )
-
-        proposed = ProposedAction(
-            tool_name=request.tool_name or "auto",
-            description=request.query,
-            category=(
-                self._coerce_category(request.category)
-                if request.category
-                else inferred_category
-            ),
-            resource=request.resource or inferred_resource,
-            amount=request.amount,
-            environment=request.environment,
-            user_id=request.user_id,
-        )
-
-        decision: PolicyDecision = self.policy_engine.evaluate(proposed)
-
-        if decision.outcome == ApprovalOutcome.DENY:
+        request_id = compute_request_id_from_action(request.query)
+        if existing_approval_item := get_approval_status(request_id):
+            decision = existing_approval_item.approval_status
+        else:
+            request_id, decision = self._start_approval(request)
+        if decision == ApprovalOutcome.DENY:
             return OrchestratorResult(
                 status="denied", message=decision.rationale
             )
 
-        if decision.outcome == ApprovalOutcome.ALLOW:
-            return await self._execute_direct(request)
+
+        if decision == ApprovalOutcome.ALLOW:
+            return await self._execute_direct(request, approval_request_id=request_id)
 
         # REQUIRE_APPROVAL path
-        request_id = self._start_approval(proposed)
         self.memory.append(
             "system",
             (
                 "Approval requested for: "
-                f"{proposed.description} (id={request_id})"
+                f"{request.query} (id={request_id})"
             ),
         )
 
@@ -146,12 +135,12 @@ class AgentOrchestrator:
                 message=f"Approval status: {status}",
             )
 
-        result = await self._execute_direct(request)
+        result = await self._execute_direct(request, approval_request_id=request_id)
         result.request_id = request_id
         return result
 
     async def _execute_direct(
-        self, request: OrchestratorRequest
+        self, request: OrchestratorRequest, approval_request_id: str | None = None
     ) -> OrchestratorResult:
         """Execute the request through the MCP client directly."""
 
@@ -162,7 +151,15 @@ class AgentOrchestrator:
             else request.query
         )
 
-        response_text = await invoke_mcp_client(full_query, request.user_id)
+        if approval_request_id:
+            try:
+                item = get_approval_status(approval_request_id)
+            except Exception:
+                pass
+        if not item.allowed_tools:
+            raise ValueError(f"No allowed tools found for request_id: {approval_request_id}")
+        print(f"Allowed tools: {item.allowed_tools}")
+        response_text = await invoke_mcp_client(full_query, request.user_id, item.allowed_tools)
 
         self.memory.append("user", request.query)
         self.memory.append("assistant", response_text)
@@ -170,68 +167,24 @@ class AgentOrchestrator:
 
     def _start_approval(self, proposed: ProposedAction) -> str:
         """Trigger Step Functions approval workflow; return request_id."""
-
-        if not self._hitl_sfn_arn:
-            # Fallback: directly call approval_handler lambda input format
-            # locally
-            item = ApprovalItem(
-                requester=proposed.user_id or "unknown",
-                approver="",
-                agent_prompt=proposed.description,
-                proposed_action=proposed.description,
-                reason="Policy requires approval",
-                approval_status="pending",
-            )
-            # Persist via table put through approval_handler path
-            # We avoid direct table access here to preserve encapsulation.
-            # approval_handler._handle_new_approval_request expects
-            # event-like dict
-            from .approval_handler import _handle_new_approval_request
-
-            resp = _handle_new_approval_request(
-                {
-                    "requester": item.requester,
-                    "approver": item.approver,
-                    "agent_prompt": item.agent_prompt,
-                    "proposed_action": item.proposed_action,
-                    "reason": item.reason,
-                    "approval_status": item.approval_status,
-                }
-            )
-            try:
-                created_id = resp.get("body", {}).get("request_id")  # type: ignore[union-attr]
-            except Exception:
-                created_id = None
-                # Best-effort diagnostic; do not change behavior if response
-                # format differs
-
-            # Use handler-generated id when available so polling matches the
-            # stored record
-            return created_id or item.request_id
-
-        input_payload: dict[str, Any] = {
-            "requester": proposed.user_id or "unknown",
-            "approver": "",
-            "agent_prompt": proposed.description,
-            "proposed_action": proposed.description,
-            "reason": "Policy requires approval",
-            "approval_status": "pending",
-        }
-
-        self._sfn_client.start_execution(
-            stateMachineArn=self._hitl_sfn_arn,
-            input=json.dumps(input_payload),
+        resp = handle_new_approval_request(
+            {
+                "requester": proposed.user_id or "unknown",
+                "approver": "",
+                "agent_prompt": proposed.query,
+                "proposed_action": proposed.query,
+                "reason": "Policy requires approval",
+                "proposed_tool": proposed.tool_name,
+                "approval_status":ApprovalOutcome.REQUIRE_APPROVAL,
+            }
         )
+        try:
+            created_id = resp.get("body", {}).get("request_id")  # type: ignore[union-attr]
+        except Exception:
+            created_id = None
+         
+        return created_id, resp.get("body", {}).get("status")
 
-        # The approval lambda generates the request_id; we need to fetch it
-        # to poll status. In this simplified flow, we rely on the proposed
-        # content lookup not being feasible, so we re-query by latest item is
-        # not available. Instead, we return a synthetic id by storing locally
-        # when not using Step Functions. For SFN flow, real systems should
-        # return the id from the first task. Here we fall back to asking the
-        # status by other means. To avoid changing existing handlers, we
-        # generate a client-side id for tracking logs only.
-        return "sfn-exec"
 
     def _wait_for_approval(
         self,

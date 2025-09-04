@@ -7,19 +7,20 @@ notifications to Slack (Block Kit) and optionally SNS.
 
 import hashlib
 import json
+import logging
 import os
 import traceback
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-import logging
 
 import boto3
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
 
 from src.dynamodb_utils import get_approval_table
+from src.config_store import get_mcp_servers
 from src.policy import (
     ApprovalOutcome,
     PolicyEngine,
@@ -71,6 +72,12 @@ class ApprovalItem(BaseModel):
     slack_ts: str = ""
     completion_status: str = ""
     completion_message: str = ""
+    # Tools the agent intends to use for this action (fully-qualified IDs
+    # such as "google__users_lookup").
+    intended_tools: list[str] = Field(default_factory=list)
+    # Final set of allowed tool IDs authorized by the approver/policy. The
+    # executor must enforce this allowlist at runtime.
+    allowed_tools: list[str] = Field(default_factory=list)
 
     def to_dynamodb_item(self) -> dict[str, Any]:
         """Convert to DynamoDB item format."""
@@ -208,6 +215,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 def _is_approval_decision(event) -> bool:
     """Check if the event represents an approval decision."""
     # Check for direct approval decision in body
+    if "action" in event and "request_id" in event:
+        return True
     body = event.get("body") or event.get("Input", {}).get("body")
     if isinstance(body, str):
         try:
@@ -310,6 +319,13 @@ def _handle_approval_decision(event: dict[str, Any]) -> dict[str, Any]:
 def _extract_decision_data(event: dict[str, Any]) -> dict[str, Any]:
     """Extract decision data from various event formats."""
     # Try body first (POST requests)
+    if "action" in event and "request_id" in event:
+        return {
+            "request_id": event["request_id"],
+            "action": event["action"],
+            "approver": event.get("approver", ""),
+            "reason": event.get("reason", ""),
+        }
     body = (
         event.get("body")
         or event.get("Input", {}).get("body")
@@ -362,7 +378,7 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         event = event["Input"]
 
     proposed_action_text = (event.get("proposed_action") or "").strip()
-    
+
     slack_channel = event.get("slack_channel", "")
     slack_ts = event.get("slack_ts", "")
 
@@ -370,7 +386,7 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     deterministic_request_id = compute_request_id_from_action(
         proposed_action_text
     )
-    
+
     # Evaluate policy using orchestrator policy code
     inferred_category, inferred_resource = infer_category_and_resource(
         proposed_action_text
@@ -382,10 +398,11 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         resource=inferred_resource,
         environment=os.getenv("ENVIRONMENT", "dev"),
         user_id=event.get("requester") or "slack_user",
+        intended_tools=[inferred_resource],
     )
-    
+
     decision = PolicyEngine().evaluate(proposed_action)
-    
+
     approval_item = ApprovalItem(
         request_id=deterministic_request_id,
         requester=event.get("requester", ""),
@@ -398,8 +415,10 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         slack_ts=slack_ts,
         completion_status=str(COMPLETION_STATUS.PENDING),
         completion_message="",
+        intended_tools=[inferred_resource],
+        allowed_tools=[inferred_resource],
     )
-    
+
     send_notifications(
         request_id=approval_item.request_id,
         action=approval_item.approval_status,
@@ -407,6 +426,7 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
         approver=approval_item.approver,
         agent_prompt=approval_item.agent_prompt,
         proposed_action=approval_item.proposed_action,
+        proposed_tool=inferred_resource,
         reason=approval_item.reason,
     )
 
@@ -414,7 +434,8 @@ def handle_new_approval_request(event: dict[str, Any]) -> dict[str, Any]:
     approval_item.approval_communication_status = (
         APPROVAL_COMMUNICATION_STATUS.SENT.value
     )
-
+    print(f"Approval item: {approval_item}")
+    print(f"Approval item: {approval_item.to_dynamodb_item()}")
     get_approval_table().put_item(Item=approval_item.to_dynamodb_item())
     blocks = get_header_and_context(
         deterministic_request_id, f"Request {decision.outcome.value}"
@@ -447,6 +468,7 @@ def send_notifications(
     agent_prompt: str,
     proposed_action: str,
     reason: str,
+    proposed_tool: str = None,
     approval_status: str = None,
     slack_ts: str = None,
     slack_channel: str = None,
@@ -525,6 +547,7 @@ def send_notifications(
                 proposed_action=message_content["proposed_action"],
                 approve_value=approve_value,
                 reject_value=reject_value,
+                proposed_tool=proposed_tool,
             )
             if post_message("foo", message_content["title"], blocks=blocks):
                 notification_sent = True
@@ -607,7 +630,7 @@ def get_approval_status(request_id: str) -> ApprovalItem | None:
         if item_data:
             return ApprovalItem.from_dynamodb_item(item_data)
         return None
-    except ClientError as e:
+    except ClientError:
         return None
 
 

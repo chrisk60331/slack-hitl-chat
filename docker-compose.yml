@@ -12,13 +12,13 @@ services:
       - agentcore-local
 
   # Execute Lambda for testing
-  execute-lambda:
+  approval-lambda:
     build:
       context: .
       dockerfile: Dockerfile
-      target: execute
-    container_name: agentcore-execute-local
-    env_file: environment.example
+      target: approval
+    container_name: agentcore-approval-local
+    env_file: .env
     environment:
       # Lambda runtime simulation
       - LAMBDA_TASK_ROOT=/var/task
@@ -32,7 +32,35 @@ services:
       - "9000:8080"  # Lambda Runtime Interface Emulator port
     volumes:
       - ./tests:/var/task/tests:ro
-      - ./environment.example:/var/task/.env:ro
+      - ./.env:/var/task/.env:ro
+      - ~/.aws:/root/.aws:ro
+      - .env:/var/task/.env:ro
+    networks:
+      - agentcore-local
+    # Use the default Lambda entrypoint with handler as argument
+    command: ["src.approval_handler.lambda_handler"]
+  # Execute Lambda for testing
+  execute-lambda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: execute
+    container_name: agentcore-execute-local
+    env_file: .env
+    environment:
+      # Lambda runtime simulation
+      - LAMBDA_TASK_ROOT=/var/task
+      - _HANDLER=src.execute_handler.lambda_handler
+      - TABLE_NAME=agentcore-dev-approval-log
+      - CONFIG_TABLE_NAME=agentcore-dev-config
+      - AWS_DEFAULT_REGION=us-west-2
+      - PYTHONPATH=/var/task:/opt/google_mcp
+      - LOG_LEVEL=DEBUG
+    ports:
+      - "9000:8080"  # Lambda Runtime Interface Emulator port
+    volumes:
+      - ./tests:/var/task/tests:ro
+      - ./.env:/var/task/.env:ro
       - ~/.aws:/root/.aws:ro
       - .env:/var/task/.env:ro
     networks:
