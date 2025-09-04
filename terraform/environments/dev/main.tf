@@ -142,6 +142,7 @@ module "execute_lambda" {
     APPROVAL_LAMBDA_FUNCTION_NAME =  "${local.name_prefix}_approval"
     SLACK_BOT_TOKEN = var.slack_bot_token
     SLACK_CHANNEL_ID = var.slack_channel_id
+    BEDROCK_MODEL_ID = var.bedrock_model_id
   }
 }
 

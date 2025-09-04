@@ -129,6 +129,7 @@ def build_approval_blocks(
     proposed_action: str,
     approve_value: str,
     reject_value: str,
+    proposed_tool: str,
 ) -> list[dict[str, Any]]:
     """Compose a standard approval message with Approve/Reject buttons."""
     return [
@@ -148,6 +149,13 @@ def build_approval_blocks(
             "text": {
                 "type": "mrkdwn",
                 "text": f"*Proposed Action:*\n{proposed_action}",
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Proposed Tool:*\n{proposed_tool}",
             },
         },
         {

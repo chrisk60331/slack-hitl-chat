@@ -4,7 +4,6 @@ This module provides an MCP server for Google Drive operations including
 document search, creation, and management using FastMCP.
 """
 
-import logging
 import os
 import sys
 

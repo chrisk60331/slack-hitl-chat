@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import pytest
 
 from src.config_store import (
     MCPServer,
     get_mcp_servers,
-    put_mcp_servers,
     get_policies,
+    put_mcp_servers,
     put_policies,
 )
-from src.policy import PolicyRule, ApprovalCategory
 from src.dynamodb_utils import get_table
+from src.policy import ApprovalCategory, PolicyRule
 
 
 @pytest.fixture(autouse=True)

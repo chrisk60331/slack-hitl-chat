@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from src.flask_ui import create_app
@@ -118,13 +116,12 @@ def test_servers_save_command_args(_stub_config_store: None) -> None:
 def test_servers_env_parsing_and_preservation(
     _stub_config_store: None,
 ) -> None:
-    from src.config_store import get_mcp_servers, MCPServer, MCPServersConfig
+    from src.config_store import MCPServer, MCPServersConfig, get_mcp_servers
 
     app = create_app()
     client = app.test_client()
 
     # Seed existing config with octagon env
-    from src import config_store as cs
 
     existing = MCPServersConfig(
         servers=[

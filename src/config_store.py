@@ -14,14 +14,14 @@ Workspace rules:
 
 from __future__ import annotations
 
-from typing import Any, Iterable
-
 import os
+from collections.abc import Iterable
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from .dynamodb_utils import get_table
 from .policy import PolicyRule
-
 
 CONFIG_KEY_MCP_SERVERS = "mcp_servers"
 CONFIG_KEY_POLICIES = "policies"

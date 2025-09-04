@@ -23,7 +23,6 @@ def test_execute_handler_prepends_agent_prompt(
     mock_table: MagicMock, mock_invoke: MagicMock, mock_get_status: MagicMock
 ) -> None:
     from src.execute_handler import lambda_handler
-
     from src.policy import ApprovalOutcome
     mock_get_status.return_value = type(
         "A",

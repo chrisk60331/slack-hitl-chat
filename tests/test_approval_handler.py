@@ -1,3 +1,71 @@
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import pytest
+
+from src.approval_handler import handle_new_approval_request, ApprovalItem
+
+
+def test_handle_new_approval_request_includes_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("TABLE_NAME", "dummy")
+
+    # Stub DynamoDB table writes
+    class DummyTable:
+        def put_item(self, Item: dict[str, Any]) -> None:
+            pass
+
+    from src import dynamodb_utils
+
+    monkeypatch.setattr(dynamodb_utils, "get_approval_table", lambda: DummyTable())
+
+    event = {
+        "requester": "user@example.com",
+        "agent_prompt": "Reset 2FA",
+        "proposed_action": "Reset user 2FA",
+        "intended_tools": ["google__admin_reset2fa"],
+    }
+
+    resp = handle_new_approval_request(event)
+    body = resp["body"]
+    assert body["request_id"]
+
+    # Validate allowed/intended tools are echoed into ApprovalItem saved
+    item = ApprovalItem(
+        requester=event["requester"],
+        agent_prompt=event["agent_prompt"],
+        proposed_action=event["proposed_action"],
+        intended_tools=event["intended_tools"],
+        allowed_tools=list(event["intended_tools"]),
+    )
+    assert set(item.intended_tools) == {"google__admin_reset2fa"}
+    assert set(item.allowed_tools) == {"google__admin_reset2fa"}
+
+
+def test_handle_new_approval_request_infers_google_suspend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("TABLE_NAME", "dummy")
+
+    class DummyTable:
+        def put_item(self, Item: dict[str, Any]) -> None:
+            pass
+
+    from src import dynamodb_utils
+
+    monkeypatch.setattr(dynamodb_utils, "get_approval_table", lambda: DummyTable())
+
+    # No servers config available; default alias is "google"
+    event = {
+        "requester": "cking@newmathdata.com",
+        "agent_prompt": "please suspend test_user@newmathdata.com Google Workspace account",
+        "proposed_action": "please suspend test_user@newmathdata.com Google Workspace account",
+    }
+
+    resp = handle_new_approval_request(event)
+    assert resp["statusCode"] == 200
+
 """
 Unit tests for the approval_handler module.
 

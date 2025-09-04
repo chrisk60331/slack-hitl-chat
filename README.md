@@ -6,7 +6,7 @@
 - Click CLI: run orchestrations; migrate-config to DynamoDB.
 - Slack integration: Events API, signature verification, thread context, async via Step Functions.
 - Human-in-the-loop approvals: Separate Lambdas for approval, execution, completion; DynamoDB persistence; Slack/SNS notifications.
-- MCP orchestration: Multi-server, Bedrock-powered, per-alias tool disabling, streaming tool calls.
+- MCP orchestration: Multi-server, Bedrock-powered, per-alias tool disabling, streaming tool calls, and approval-driven tool allowlisting.
 - Built-in MCP servers: Google Admin, Google Calendar, Jira, TOTP, GIFs (typed tools via FastMCP).
 - AWS/Terraform infra: VPC/networking, IAM (Bedrock, Lambda, Step Functions), DynamoDB (state, sessions, config), Lambda, Step Functions, API Gateway, ECR.
 - Config management: config_store for MCP servers and policies; CLI migration from .env/defaults.
@@ -39,6 +39,31 @@ Run in Docker:
 ```bash
 docker-compose up -d --build
  curl -sS -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" -d '{"request_id":"02d6b735f14fde47d7f0c5896031c238db719793b3f2d0e2b23e0daf5cb63e76"}'
+```
+### Approval-aware execution flow
+
+Approvals are tool-call aware and config-driven. The agent proposes an action including the intended MCP tool(s) it expects to use (for example, `google__admin_reset2fa`). The Approval Lambda records these intended tools and stores an explicit allowlist of authorized tool IDs. During execution, only these tools are available; attempts outside the set hard-fail.
+
+```mermaid
+flowchart TD
+  Q[User Query] --> P[Build ProposedAction\\n(category/resource inference)\\nintended_tools]
+  P --> E{Policy}
+  E -- Allow --> X[Execute MCP]
+  E -- Deny --> D[Stop]
+  E -- Require Approval --> A[Approval Lambda\\nstores intended_tools & allowed_tools]
+  A --> S[Slack Approve/Reject]
+  S -- Approve --> R[Executor loads allowed_tools]
+  R --> X
+  S -- Reject --> D
+```
+
+Execution gating:
+
+```mermaid
+flowchart LR
+  I[ApprovalItem.allowed_tools] --> C[Executor sets MCP_ALLOWED_TOOLS]
+  C --> M[MCPClient filters list_tools and call_tool]
+  M -- outside allowlist --> F[Hard fail]
 ```
 ### How to test
 

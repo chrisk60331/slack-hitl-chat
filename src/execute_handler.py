@@ -8,7 +8,6 @@ based on the approval request ID.
 import asyncio
 import json
 import logging
-import os
 import sys
 import traceback
 from datetime import UTC, datetime
@@ -20,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.approval_handler import COMPLETION_STATUS, get_approval_status
 from src.mcp_client import invoke_mcp_client
 from src.policy import ApprovalOutcome
+import os
 
 logger = logging.getLogger(__name__)
 # Set up more detailed logging for debugging
@@ -121,9 +121,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     if getattr(approval_item, "agent_prompt", None)
                     else action_text
                 )
-                response_body = asyncio.run(
-                    invoke_mcp_client(combined_query, approval_item.requester)
-                )
+                # Enforce allowlist of tools from the approval item
+                try:
+                    allowed = getattr(approval_item, "allowed_tools", None)
+
+                except Exception:
+                    allowed = None
+
+                response_body = asyncio.run(invoke_mcp_client(combined_query, approval_item.requester, allowed))
                 table.update_item(
                     Key={"request_id": request_id},
                     UpdateExpression="SET completion_status = :status, completion_message = :message",

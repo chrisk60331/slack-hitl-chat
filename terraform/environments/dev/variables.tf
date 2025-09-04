@@ -183,3 +183,8 @@ variable "slack_channel_id" {
   type        = string
   default     = ""
 }
+
+variable "bedrock_model_id" {
+  description = "Bedrock model ID"
+  type        = string
+}

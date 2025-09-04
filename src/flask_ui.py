@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from flask import Flask, redirect, render_template, request, url_for, flash
+from flask import Flask, flash, redirect, render_template, request, url_for
 
 from .config_store import (
     MCPServer,
     get_mcp_servers,
-    put_mcp_servers,
     get_policies,
+    put_mcp_servers,
     put_policies,
+    ApprovalCategory, 
+    PolicyRule
 )
 from .dynamodb_utils import get_approval_table
 
@@ -100,8 +102,6 @@ def create_app() -> Flask:
 
     @app.post("/policies")
     def save_policies() -> Any:
-        from .policy import PolicyRule, ApprovalCategory
-
         names = request.form.getlist("name")
         categories = request.form.getlist("categories")
         envs = request.form.getlist("environments")
