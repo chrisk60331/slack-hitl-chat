@@ -15,7 +15,7 @@ from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .config_store import (
+from src.config_store import (
     MCPServer,
     MCPServersConfig,
     PoliciesConfig,
@@ -24,9 +24,9 @@ from .config_store import (
     put_mcp_servers,
     put_policies,
 )
-from .dynamodb_utils import get_approval_table
-from .mcp_client import MCPClient
-from .orchestrator import AgentOrchestrator, OrchestratorRequest
+from src.dynamodb_utils import get_approval_table
+from src.mcp_client import MCPClient
+from src.orchestrator import AgentOrchestrator, OrchestratorRequest
 
 app = FastAPI(title="AgentCore Orchestrator API")
 _orchestrator = AgentOrchestrator()
@@ -34,7 +34,7 @@ _sessions: dict[str, dict[str, Any]] = {}
 logger = logging.getLogger(__name__)
 # Mount Flask Admin UI under /admin
 try:
-    from .flask_ui import create_app as _create_flask_app
+    from src.flask_ui import create_app as _create_flask_app
 
     _flask_app = _create_flask_app()
     app.mount("/admin", WSGIMiddleware(_flask_app))

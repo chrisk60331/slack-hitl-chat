@@ -27,17 +27,12 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
 
-# System instructions to guide tool usage, especially AWS role add/remove
-SYSTEM_PROMPT_PATH: str = os.path.join(
-    os.path.dirname(__file__), "system_prompt.txt"
-)
+
 try:
-    with open(SYSTEM_PROMPT_PATH, encoding="utf-8") as _f:
-        SYSTEM_PROMPT: str = _f.read()
+    with open("src/system_prompt.txt", "r") as f:
+        SYSTEM_PROMPT = f.read()
 
 except FileNotFoundError:
-    # Fallback to an empty prompt if the file is missing to avoid crashes
-    SYSTEM_PROMPT = ""
     raise ValueError("SYSTEM_PROMPT_PATH not found")
 
 
@@ -416,7 +411,7 @@ class MCPClient:
         for alias, command, args, env in launch_items:
             # Resolve command to absolute path if available (helps in Lambda where PATH may differ)
             resolved = shutil.which(command) or command
-            logger.error(
+            logger.info(
                 f"Connecting to server {resolved} {args} with requester email {requester_email}"
             )
 
@@ -491,7 +486,7 @@ class MCPClient:
             if servers_env:
                 mapping = self._parse_servers_env(servers_env)
                 if mapping:
-                    await self.connect_to_servers(mapping, requester_email)
+                    await self.connect_to_servers(mapping, requester_email, allowed_tools=allowed_tools)
         messages = [
             {"role": "user", "content": [{"type": "text", "text": query}]}
         ]
@@ -499,7 +494,7 @@ class MCPClient:
         # Discover tools from either single session or multi-sessions
         available_tools: list[dict[str, Any]] = []
         if self.sessions:
-            logger.error(f"Allowed tools: {allowed_tools}")
+            logger.info(f"Allowed tools: {allowed_tools}")
             for _qualified, (_alias, _tname) in self.tool_registry.items():
                 # We cannot fetch input schema here without another call; rely on list_tools per session
                 # Build available tools by querying each session once
@@ -600,7 +595,7 @@ class MCPClient:
                 tool_use_id = tool_content.get("id")
 
                 try:
-                    logger.error(f"mcp.tool.execute extra={tool_name}")
+                    logger.info(f"mcp.tool.execute extra={tool_name}")
                     # Execute tool call
                     if self.sessions and "__" in tool_name:
                         alias, short_name = tool_name.split("__", 1)
@@ -623,7 +618,7 @@ class MCPClient:
 
                     tool_output = str(result.content)
 
-                    logger.error(f"Tool {tool_name} output: {tool_output}")
+                    logger.info(f"Tool {tool_name} output: {tool_output}")
                     tool_results.append(
                         {
                             "type": "tool_result",

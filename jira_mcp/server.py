@@ -1,13 +1,36 @@
-import base64
-import io
 import logging
 import os
 from typing import Any
+import sys
 
-import polars as pl
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
+sys.path.append("/var/task/")
+from jira_mcp.core import (
+    _jira_client,
+    _build_list_issues_jql,
+    _extract_simple_fields,
+    _select_best_project_match,
+    _lookup_account_id_by_email,
+    _resolve_project_template_key,
+    _rows_to_issues,
+    _get_project_role_url,
+    _load_csv_from_path,
+    _load_csv_to_frame,
+    _format_project_entry,
+)
+from jira_mcp.models import (
+    ListIssuesRequest,
+    LookupProjectKeyRequest,
+    CreateProjectRequest,
+    BulkIssueUploadRequest,
+    DeleteProjectIssuesRequest,
+    DeleteProjectRequest,
+    AddProjectAdminRequest,
+    ListProjectsRequest,
+    FilterProjectsByUserRequest,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,175 +39,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 mcp = FastMCP("Jira MCP Server")
-
-
-def _resolve_project_template_key(key_or_alias: str) -> str:
-    """Resolve a friendly template alias into a Jira projectTemplateKey.
-
-    Supports friendly names like "scrum" and "kanban" while still accepting
-    full template keys containing a colon (":").
-    """
-    value = (key_or_alias or "").strip()
-    if ":" in value:
-        return value
-    normalized = value.lower().replace(" ", "-")
-    alias_map = {
-        # Primary simplified agility templates
-        "scrum": "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum",
-        "kanban": "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban",
-        "agility-scrum": "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum",
-        "agility-kanban": "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban",
-        # Classic templates
-        "scrum-classic": "com.pyxis.greenhopper.jira:gh-simplified-scrum-classic",
-        "kanban-classic": "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic",
-        # Other known greenhopper templates
-        "gh-scrum-template": "com.pyxis.greenhopper.jira:gh-scrum-template",
-        "gh-kanban-template": "com.pyxis.greenhopper.jira:gh-kanban-template",
-        # Basic software
-        "basic": "com.pyxis.greenhopper.jira:gh-simplified-basic",
-        "basic-software-development-template": "com.pyxis.greenhopper.jira:basic-software-development-template",
-        "software-basic": "com.pyxis.greenhopper.jira:basic-software-development-template",
-    }
-    resolved = alias_map.get(normalized)
-    if not resolved:
-        supported = ", ".join(sorted(alias_map.keys()))
-        raise ValueError(
-            f"Unknown project template alias '{key_or_alias}'. Supported aliases: {supported}, or pass a full template key."
-        )
-    return resolved
-
-
-def _jira_client():
-    """Create an authenticated Jira client using environment variables.
-
-    Required env vars:
-      - JIRA_BASE_URL
-      - JIRA_EMAIL
-      - JIRA_API_TOKEN
-    """
-    from jira import (
-        JIRA,
-    )  # Imported lazily to avoid test import-time dependency
-
-    return JIRA(
-        server=os.environ["JIRA_BASE_URL"],
-        basic_auth=(os.environ["JIRA_EMAIL"], os.environ["JIRA_API_TOKEN"]),
-        options={
-            "rest_api_version": "3",
-            "verify": True,
-            "headers": {
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-        },
-    )
-
-
-class ListIssuesRequest(BaseModel):
-    """Request model for listing Jira issues using JQL or simple filters.
-
-    Attributes:
-        jql: Optional raw JQL to use. When provided, other filters are ignored.
-        projectKey: Optional project key to scope results, e.g., "ENG".
-        issueType: Optional issue type filter, e.g., "Bug", "Task", "Story".
-        status: Optional status filter, e.g., "To Do", "In Progress", "Done".
-        assigneeEmail: Optional assignee email filter.
-        reporterEmail: Optional reporter email filter.
-        labels: Optional list of label names to require (matches any).
-        fields: Optional list of field names to return; defaults to common fields.
-        startAt: Pagination start index.
-        maxResults: Maximum number of results to return.
-        orderBy: Optional JQL ORDER BY clause (e.g., "-created", "priority DESC").
-    """
-
-    jql: str | None = None
-    projectKey: str | None = None
-    issueType: str | None = None
-    status: str | None = None
-    assigneeEmail: str | None = None
-    reporterEmail: str | None = None
-    labels: list[str] | None = None
-    fields: list[str] | None = None
-    startAt: int = 0
-    maxResults: int = 50
-    orderBy: str | None = None
-
-
-def _escape_jql_value(value: str) -> str:
-    """Escape a string value for safe inclusion in JQL quoted literals."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _build_list_issues_jql(request: ListIssuesRequest) -> str:
-    """Build a JQL string from ListIssuesRequest simple filters.
-
-    If request.jql is provided, returns it as-is (trimmed).
-    """
-    if request.jql and request.jql.strip():
-        base = request.jql.strip()
-    else:
-        clauses: list[str] = []
-        if request.projectKey:
-            clauses.append(f"project = {request.projectKey}")
-        if request.issueType:
-            v = _escape_jql_value(request.issueType)
-            clauses.append(f'issuetype = "{v}"')
-        if request.status:
-            v = _escape_jql_value(request.status)
-            clauses.append(f'status = "{v}"')
-        if request.assigneeEmail:
-            v = _escape_jql_value(request.assigneeEmail)
-            clauses.append(f'assignee = "{v}"')
-        if request.reporterEmail:
-            v = _escape_jql_value(request.reporterEmail)
-            clauses.append(f'reporter = "{v}"')
-        if request.labels:
-            label_values = ", ".join(
-                [f'"{_escape_jql_value(lbl)}"' for lbl in request.labels]
-            )
-            if label_values:
-                clauses.append(f"labels in ({label_values})")
-        base = " AND ".join(clauses) if clauses else ""
-    if request.orderBy and request.orderBy.strip():
-        # Allow leading '-' shorthand for DESC on a single field
-        order = request.orderBy.strip()
-        if order.startswith("-") and " " not in order:
-            order = f"{order[1:]} DESC"
-        base = f"{base} ORDER BY {order}".strip()
-    return base or "order by created DESC"
-
-
-def _extract_simple_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    """Extract a simple subset of Jira fields into flattened values.
-
-    Always attempts to include summary, status, issuetype, assignee, reporter, priority.
-    Missing fields are omitted.
-    """
-    result: dict[str, Any] = {}
-    if "summary" in fields and fields["summary"] is not None:
-        result["summary"] = fields["summary"]
-    status = fields.get("status") or {}
-    if isinstance(status, dict) and status.get("name"):
-        result["status"] = status.get("name")
-    issuetype = fields.get("issuetype") or {}
-    if isinstance(issuetype, dict) and issuetype.get("name"):
-        result["issuetype"] = issuetype.get("name")
-    assignee = fields.get("assignee") or {}
-    if isinstance(assignee, dict):
-        email = assignee.get("emailAddress")
-        display = assignee.get("displayName")
-        if email or display:
-            result["assignee"] = email or display
-    reporter = fields.get("reporter") or {}
-    if isinstance(reporter, dict):
-        email = reporter.get("emailAddress")
-        display = reporter.get("displayName")
-        if email or display:
-            result["reporter"] = email or display
-    priority = fields.get("priority") or {}
-    if isinstance(priority, dict) and priority.get("name"):
-        result["priority"] = priority.get("name")
-    return result
 
 
 @mcp.tool(
@@ -244,48 +98,6 @@ def list_issues(request: ListIssuesRequest) -> dict[str, Any]:
     }
 
 
-class LookupProjectKeyRequest(BaseModel):
-    """Request to look up a Jira project key by project name.
-
-    Attributes:
-        name: Project name to search for.
-        maxResults: Maximum projects to fetch from the API (when using search endpoint).
-    """
-
-    name: str = Field(min_length=1)
-    maxResults: int = 50
-
-
-def _select_best_project_match(
-    name: str, projects: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    """Select the best matching project by name using simple heuristics.
-
-    Priority:
-    1) Case-insensitive exact match on name
-    2) Case-insensitive startswith
-    3) Case-insensitive substring
-    4) Fallback to the first project
-    """
-    target = name.strip().lower()
-    if not projects:
-        return None
-
-    def norm(n: str | None) -> str:
-        return (n or "").strip().lower()
-
-    exact = [p for p in projects if norm(p.get("name")) == target]
-    if exact:
-        return exact[0]
-    starts = [p for p in projects if norm(p.get("name")).startswith(target)]
-    if starts:
-        return starts[0]
-    contains = [p for p in projects if target in norm(p.get("name"))]
-    if contains:
-        return contains[0]
-    return projects[0]
-
-
 @mcp.tool(
     name="lookup_project_key",
     description="Look up a Jira project key by project name using the project search API.",
@@ -340,15 +152,6 @@ def lookup_project_key(request: LookupProjectKeyRequest) -> dict[str, Any]:
     }
 
 
-class CreateProjectRequest(BaseModel):
-    name: str
-    key: str
-    projectTypeKey: str = Field(pattern="^(software|service_desk|business)$")
-    projectTemplateKey: str
-    leadAccountId: str | None = None
-    leadEmail: str | None = None
-
-
 @mcp.tool(
     name="create_project",
     description="Create a Jira project via REST v3.",
@@ -375,9 +178,7 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
         "key": request.key,
         "name": request.name,
         "projectTypeKey": request.projectTypeKey,
-        "projectTemplateKey": _resolve_project_template_key(
-            request.projectTemplateKey
-        ),
+        "projectTemplateKey": _resolve_project_template_key(request.projectTemplateKey),
     }
     if lead_account_id:
         payload["leadAccountId"] = lead_account_id
@@ -389,229 +190,6 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
         "projectKey": data.get("key"),
         "selfUrl": data.get("self"),
     }
-
-
-class BulkIssueUploadRequest(BaseModel):
-    projectKey: str
-    csv: str | None = Field(
-        default=None, description="Raw CSV string or base64"
-    )
-    s3Url: str | None = Field(
-        default=None, description="S3 URL (not supported in this server)"
-    )
-    dryRun: bool = Field(
-        default=True,
-        description="If true, validate only and don't create issues",
-    )
-    batchSize: int = Field(default=50, description="Bulk API batch size")
-    defaults: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Default Jira field values applied to every issue",
-    )
-    fieldMap: dict[str, str] = Field(
-        default_factory=dict,
-        description="CSV header -> logical field name mapping overrides",
-    )
-    csvPath: str | None = Field(
-        default=None,
-        description="Filesystem path to CSV file. If not provided, tool auto-detects standard template in CWD.",
-    )
-
-
-def _load_csv_to_frame(csv_text: str) -> pl.DataFrame:
-    """Load CSV content (raw or base64-encoded) into a Polars DataFrame."""
-    if csv_text.strip().startswith(
-        "UEsDB"
-    ):  # looks like zipped base64 (not supported here)
-        raise ValueError("Compressed CSV is not supported")
-    try:
-        decoded_bytes = base64.b64decode(csv_text)
-        return pl.read_csv(io.BytesIO(decoded_bytes))
-    except Exception:
-        return pl.read_csv(io.BytesIO(csv_text.encode("utf-8")))
-
-
-def _load_csv_from_path(path: str) -> pl.DataFrame:
-    """Load CSV from a filesystem path into a Polars DataFrame."""
-    with open(path, "rb") as f:
-        return pl.read_csv(f)
-
-
-def _lookup_account_id_by_email(jira: Any, email: str) -> str | None:
-    """Lookup Jira Cloud account id by email using the v3 user search endpoint.
-
-    Returns accountId if found, otherwise None.
-    """
-    url = jira._get_url("user/search")
-    resp = jira._session.get(url, params={"query": email, "maxResults": 10})
-    if not resp.ok:
-        return None
-    try:
-        users = resp.json() or []
-    except Exception:
-        return None
-    email_lower = email.lower()
-    for user in users:
-        if str(user.get("emailAddress", "")).lower() == email_lower:
-            return user.get("accountId")
-    # Fallback: if single result, use it
-    if users:
-        return users[0].get("accountId")
-    return None
-
-
-def _rows_to_issues(
-    df: pl.DataFrame, field_map: dict[str, str], defaults: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """Convert a CSV DataFrame into Jira bulk issue payloads.
-
-    Required columns: Summary, IssueType.
-    """
-    issues: list[dict[str, Any]] = []
-
-    # Normalize headers: strip leading/trailing whitespace
-    rename_map: dict[str, str] = {}
-    for column_name in df.columns:
-        stripped = column_name.strip()
-        if stripped != column_name:
-            rename_map[column_name] = stripped
-    if rename_map:
-        df = df.rename(rename_map)
-
-    headers = list(df.columns)
-
-    # Helper to resolve a logical field name to an actual column name
-    def resolve_column(logical_name: str, synonyms: list[str]) -> str | None:
-        mapped = field_map.get(logical_name)
-        if mapped and mapped in headers:
-            return mapped
-        if logical_name in headers:
-            return logical_name
-        for candidate in synonyms:
-            if candidate in headers:
-                return candidate
-        return None
-
-    # Minimal ADF conversion for plain text descriptions
-    def to_adf(text: str) -> dict[str, Any]:
-        paragraphs = []
-        for block in str(text).splitlines():
-            block = block.rstrip("\r")
-            if block:
-                paragraphs.append(
-                    {
-                        "type": "paragraph",
-                        "content": [{"type": "text", "text": block}],
-                    }
-                )
-            else:
-                paragraphs.append({"type": "paragraph"})
-        if not paragraphs:
-            paragraphs = [{"type": "paragraph"}]
-        return {"type": "doc", "version": 1, "content": paragraphs}
-
-    summary_col = resolve_column(
-        "Summary", synonyms=["Title"]
-    )  # allow Title as synonym
-    issuetype_col = resolve_column(
-        "IssueType",
-        synonyms=[
-            "Issue Type",
-            "Ticket Type for Scrum",
-            "Ticket Type for Kanban",
-            "Ticket Type",
-        ],
-    )
-    description_primary_col = resolve_column("Description", synonyms=[])
-    description_secondary_col = resolve_column(
-        "Acceptance Criteria/ What we need to do",
-        synonyms=["Acceptance Criteria"],
-    )
-    labels_col = resolve_column("Labels", synonyms=["Label", "Tags"])
-    components_col = resolve_column(
-        "Components", synonyms=["Component", "Component/s"]
-    )
-    assignee_email_col = resolve_column(
-        "AssigneeEmail",
-        synonyms=["Assignee", "Assignee Email", "Assignee email"],
-    )
-
-    # Validate required columns after applying mappings/synonyms
-    if not summary_col:
-        raise ValueError("Missing required column: Summary")
-    if not issuetype_col:
-        raise ValueError("Missing required column: IssueType")
-
-    for row in df.iter_rows(named=True):
-        summary = row.get(summary_col)
-
-        # Determine issue type from mapped column; if it is empty, try other known type columns
-        issue_type_value: str | None = None
-        if issuetype_col:
-            v = row.get(issuetype_col)
-            if v is not None and str(v).strip():
-                issue_type_value = str(v).strip()
-        if not issue_type_value:
-            for fallback_col in [
-                "IssueType",
-                "Issue Type",
-                "Ticket Type for Scrum",
-                "Ticket Type for Kanban",
-                "Ticket Type",
-            ]:
-                if fallback_col in headers:
-                    v = row.get(fallback_col)
-                    if v is not None and str(v).strip():
-                        issue_type_value = str(v).strip()
-                        break
-
-        # Build description as ADF from available columns
-        description_text_parts: list[str] = []
-        if description_primary_col:
-            v = row.get(description_primary_col)
-            if v is not None and str(v).strip():
-                description_text_parts.append(str(v).strip())
-        if description_secondary_col:
-            v = row.get(description_secondary_col)
-            if v is not None and str(v).strip():
-                description_text_parts.append(str(v).strip())
-        description_adf: dict[str, Any] | None = None
-        if description_text_parts:
-            description_adf = to_adf("\n\n".join(description_text_parts))
-
-        assignee_email = (
-            row.get(assignee_email_col) if assignee_email_col else None
-        )
-        labels = row.get(labels_col) if labels_col else None
-        components = row.get(components_col) if components_col else None
-
-        fields: dict[str, Any] = {**defaults}
-        if description_adf is not None:
-            fields["description"] = description_adf
-        if labels:
-            fields["labels"] = [
-                s.strip() for s in str(labels).split(",") if s.strip()
-            ]
-        if components:
-            fields["components"] = [
-                {"name": s.strip()}
-                for s in str(components).split(",")
-                if s.strip()
-            ]
-        if assignee_email:
-            fields["assignee"] = {"emailAddress": assignee_email}
-
-        issues.append(
-            {
-                "fields": {
-                    "summary": summary,
-                    "issuetype": {"name": issue_type_value},
-                    **fields,
-                }
-            }
-        )
-
-    return issues
 
 
 @mcp.tool(
@@ -635,7 +213,7 @@ def bulk_issue_upload(request: BulkIssueUploadRequest) -> dict[str, Any]:
         raise ValueError(
             "s3Url not supported in this minimal server; pass csv string"
         )
-    df: pl.DataFrame
+    # Avoid importing heavy libs in the server module; construct the DataFrame in core helpers
     if request.csvPath:
         df = _load_csv_from_path(request.csvPath)
     else:
@@ -712,22 +290,6 @@ def bulk_issue_upload(request: BulkIssueUploadRequest) -> dict[str, Any]:
         "warnings": warnings,
         "errors": errors,
     }
-
-
-class DeleteProjectIssuesRequest(BaseModel):
-    projectKey: str
-    jql: str | None = None
-    issueType: str | None = None
-    dryRun: bool = True
-    maxBatch: int = 100
-
-
-class DeleteProjectRequest(BaseModel):
-    """Request model for deleting an entire project."""
-
-    projectKey: str
-    dryRun: bool = True
-    forceDelete: bool = False
 
 
 @mcp.tool(
@@ -1019,6 +581,71 @@ def delete_project(request: DeleteProjectRequest) -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="add_project_admin",
+    description="Add a user to a Jira project's Administrators role. Provide projectKey and either accountId or email.",
+)
+def add_project_admin(request: AddProjectAdminRequest) -> dict[str, Any]:
+    """Add a user as an admin to a Jira project by adding them to the admin role.
+
+    Resolves accountId from email when needed. Returns details about the
+    project, role, and user addition.
+    """
+    jira = _jira_client()
+
+    # Resolve accountId from email if necessary
+    account_id = request.accountId
+    if not account_id and request.email:
+        account_id = _lookup_account_id_by_email(jira, request.email)
+        if not account_id:
+            raise ValueError(
+                f"Could not resolve accountId from email: {request.email}"
+            )
+
+    if not account_id:
+        raise ValueError("Provide accountId or email")
+
+    # Resolve the role URL for Administrators (or requested role)
+    role = _get_project_role_url(jira, request.projectKey, request.roleName)
+    if not role:
+        raise ValueError(
+            f"Could not find an Administrators role for project {request.projectKey}"
+        )
+    role_name, role_url = role
+
+    # Add the user to the role; Jira Cloud expects accountIds under 'user'
+    payload = {"user": [account_id]}
+    resp = jira._session.post(
+        role_url, json=payload, headers={"Content-Type": "application/json"}
+    )
+
+    # If already a member, Jira may return 400/409; treat as success idempotently
+    if resp.status_code in {200, 201, 204}:
+        pass
+    else:
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            # Best-effort idempotent handling for duplicates
+            text = getattr(resp, "text", "")
+            if resp.status_code in {400, 409} and (
+                "already" in text.lower() or "exists" in text.lower()
+            ):
+                # Treat as success
+                logger.info(
+                    "User already in role; treating add as successful"
+                )
+            else:
+                raise e
+
+    return {
+        "projectKey": request.projectKey,
+        "roleName": role_name,
+        "accountId": account_id,
+        "added": True,
+    }
+
+
+@mcp.tool(
     name="list_local_csv_templates",
     description="List CSV files in the current directory that look like import templates.",
 )
@@ -1038,6 +665,30 @@ def list_local_csv_templates() -> dict[str, Any]:
     )
     return {"csvFiles": candidates_sorted}
 
+
+@mcp.tool(
+    name="list_projects_for_user",
+    description="List Jira projects the specified user can browse (permission BROWSE_PROJECTS). ",
+)
+def list_projects_for_user(request: FilterProjectsByUserRequest) -> dict[str, Any]:
+    jira = _jira_client()
+    # Resolve accountId from email if needed
+    # account_id = request.accountId or (
+    #     _lookup_account_id_by_email(jira, request.email or sys.argv[1])
+    # )
+    account_id = _lookup_account_id_by_email(jira, sys.argv[1])
+    logger.info(f"Account ID: {account_id}")
+    if not account_id:
+        raise ValueError("Provide email or accountId")
+
+    # Jira permissions API for projects a user has a permission on
+    projects = {issue.fields.project.key for issue in jira.search_issues(f"assignee={account_id}")}
+    
+    return {
+        "count": len(projects),
+        "projects": projects,
+
+    }
 
 if __name__ == "__main__":
     # Use stdio transport for MCP compatibility

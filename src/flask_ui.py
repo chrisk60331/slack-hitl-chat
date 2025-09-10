@@ -10,10 +10,9 @@ from .config_store import (
     get_mcp_servers,
     get_policies,
     put_mcp_servers,
-    put_policies,
-    ApprovalCategory, 
-    PolicyRule
+    put_policies, 
 )
+from src.policy import ApprovalCategory, PolicyRule
 from .dynamodb_utils import get_approval_table
 
 

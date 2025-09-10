@@ -44,3 +44,5 @@ async def test_mcp_client_enforces_allowlist(monkeypatch: pytest.MonkeyPatch) ->
     assert tools == ["alias__foo"]
 
 
+
+

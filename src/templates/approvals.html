@@ -48,7 +48,7 @@
               <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="date"><span>Timestamp</span> <span class="sort-indicator"></span></th>
               <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>proposed_action</span> <span class="sort-indicator"></span></th>
               <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>completion_message</span> <span class="sort-indicator"></span></th>
-              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>approver</span> <span class="sort-indicator"></span></th>
+              <th class="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 sortable" data-type="string"><span>requester</span> <span class="sort-indicator"></span></th>
             </tr>
           </thead>
           <tbody>
@@ -59,7 +59,7 @@
               <td class="p-2">{{ item.timestamp }}</td>
               <td class="p-2">{{ item.proposed_action }}</td>
               <td class="p-2">{{ item.completion_message }}</td>
-              <td class="p-2">{{ item.approver }}</td>
+              <td class="p-2">{{ item.requester }}</td>
             </tr>
             {% endfor %}
           </tbody>

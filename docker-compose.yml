@@ -62,76 +62,38 @@ services:
       - ./tests:/var/task/tests:ro
       - ./.env:/var/task/.env:ro
       - ~/.aws:/root/.aws:ro
-      - .env:/var/task/.env:ro
     networks:
       - agentcore-local
     # Use the default Lambda entrypoint with handler as argument
     command: ["src.execute_handler.lambda_handler"]
 
   # Test runner container (separate from lambda runtime)
-  test-runner:
+  api-lambda:
     build:
       context: .
       dockerfile: Dockerfile
-      target: execute
-    container_name: agentcore-test-runner
+      target: api
+    container_name: agentcore-api-local
+    env_file: .env
     environment:
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
-      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
-      - TABLE_NAME=agentcore-approvals-local
-      - GOOGLE_TOKEN_JSON=${GOOGLE_TOKEN_JSON:-placeholder_token}
-      - LOG_LEVEL=DEBUG
+      # Lambda runtime simulation
+      - LAMBDA_TASK_ROOT=/var/task
+      - _HANDLER=src.execute_handler.lambda_handler
+      - TABLE_NAME=agentcore-dev-approval-log
+      - CONFIG_TABLE_NAME=agentcore-dev-config
+      - AWS_DEFAULT_REGION=us-west-2
       - PYTHONPATH=/var/task:/opt/google_mcp
+      - LOG_LEVEL=DEBUG
+      - AWS_LAMBDA_FUNCTION_NAME=api
+    ports:
+      - "9000:8080"  # Lambda Runtime Interface Emulator port
     volumes:
-      - ./src:/var/task/src:ro
-      - ./tests:/var/task/tests:ro
-      - ./scripts:/var/task/scripts:ro
-    depends_on:
-      - dynamodb-local
-      - execute-lambda
+      - ./.env:/var/task/.env:ro
+      - ~/.aws:/root/.aws:ro
     networks:
       - agentcore-local
-    # Override entrypoint to use regular Python instead of Lambda runtime
-    entrypoint: ["/bin/bash"]
-    command: ["-c", "while true; do sleep 30; done"]
-
-  # Alternative: Direct Python test runner (no Lambda runtime)
-  python-tester:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: execute
-    container_name: agentcore-python-tester
-    environment:
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
-      - AWS_ENDPOINT_URL=http://dynamodb-local:8000
-      - TABLE_NAME=agentcore-approvals-local
-      - GOOGLE_TOKEN_JSON=${GOOGLE_TOKEN_JSON:-placeholder_token}
-      - LOG_LEVEL=DEBUG
-      - PYTHONPATH=/var/task:/opt/google_mcp
-      # Google MCP configuration requirements
-      - AZURE_TENANT_ID=test-tenant
-      - AZURE_CLIENT_ID=test-client
-      - AZURE_CLIENT_SECRET=test-secret
-      - GOOGLE_CLIENT_ID=test-google-client
-      - GOOGLE_CLIENT_SECRET=test-google-secret
-      - GOOGLE_REFRESH_TOKEN=test-refresh-token
-    volumes:
-      - ./src:/var/task/src:ro
-      - ./tests:/var/task/tests:ro
-      - ./scripts:/var/task/scripts:ro
-    depends_on:
-      - dynamodb-local
-    networks:
-      - agentcore-local
-    # Keep container running for testing
-    entrypoint: ["/bin/bash"]
-    command: ["-c", "echo 'Python tester ready...' && while true; do sleep 30; done"]
-    working_dir: /var/task
+    # Use the default Lambda entrypoint with handler as argument
+    command: ["src.api.handler"]
 
 networks:
   agentcore-local:

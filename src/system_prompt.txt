@@ -50,6 +50,7 @@ Gif tool
 
 * Dont use offensive or religious gifs
 * only return one (one) best result
+* always return URL of gif
 
 Examples (tool input payloads):
 

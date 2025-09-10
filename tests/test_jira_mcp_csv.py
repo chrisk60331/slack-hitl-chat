@@ -1,6 +1,6 @@
 import polars as pl
 
-from jira_mcp.server import _resolve_project_template_key, _rows_to_issues
+from jira_mcp.core import _resolve_project_template_key, _rows_to_issues
 
 
 def test_rows_to_issues_basic():

@@ -1,4 +1,4 @@
-from jira_mcp.server import (
+from jira_mcp.core import (
     ListIssuesRequest,
     _build_list_issues_jql,
     _extract_simple_fields,

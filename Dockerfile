@@ -1,8 +1,3 @@
-# Multi-stage Dockerfile for AgentCore Marketplace Lambda functions
-
-# Base stage with common setup
-FROM public.ecr.aws/lambda/python:3.11 AS test
-
 FROM public.ecr.aws/lambda/python:3.11 AS base
 # Base stage with common setup
 
@@ -107,5 +102,4 @@ FROM base AS api
 ENV PORT=8080
 WORKDIR "/var/task"
 COPY .env ./
-COPY google_mcp/ ./google_mcp/
 CMD ["src.api.handler"]

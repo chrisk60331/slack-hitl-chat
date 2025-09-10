@@ -13,6 +13,10 @@
 - Slack Block Kit helpers: Post/edit, JSON-to-blocks parsing.
 - Testing + DX: Extensive pytest suite; uv workflows; Docker support; rich environment.example.
 
+### Recent updates
+
+- Approvals Audit page now displays the requester alongside other fields.
+
 ### What it does
 
 Human-in-the-loop AI orchestration for executing tasks via MCP tools (Google, Jira, etc.), with policy checks, approval flows, and a FastAPI gateway. Includes a CLI for direct runs.
@@ -35,38 +39,23 @@ Run CLI:
 ```bash
 uv run hitl-mcp run --user-id <your email here> --environment dev --query "<your query here>"
 ```
-Run in Docker:
+### Run in Docker:
 ```bash
 docker-compose up -d --build
  curl -sS -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" -d '{"request_id":"02d6b735f14fde47d7f0c5896031c238db719793b3f2d0e2b23e0daf5cb63e76"}'
 ```
-### Approval-aware execution flow
-
-Approvals are tool-call aware and config-driven. The agent proposes an action including the intended MCP tool(s) it expects to use (for example, `google__admin_reset2fa`). The Approval Lambda records these intended tools and stores an explicit allowlist of authorized tool IDs. During execution, only these tools are available; attempts outside the set hard-fail.
-
-```mermaid
-flowchart TD
-  Q[User Query] --> P[Build ProposedAction\\n(category/resource inference)\\nintended_tools]
-  P --> E{Policy}
-  E -- Allow --> X[Execute MCP]
-  E -- Deny --> D[Stop]
-  E -- Require Approval --> A[Approval Lambda\\nstores intended_tools & allowed_tools]
-  A --> S[Slack Approve/Reject]
-  S -- Approve --> R[Executor loads allowed_tools]
-  R --> X
-  S -- Reject --> D
+# Run pezzo
+```bash
+cd pezzo
+npm install
+docker-compose -f docker-compose.infra.yaml up -d
+npx dotenv-cli -e apps/server/.env -- npx prisma migrate deploy --schema apps/server/prisma/schema.prisma &
+npm run graphql:codegen:watch &
+npx nx serve console 
 ```
-
-Execution gating:
-
-```mermaid
-flowchart LR
-  I[ApprovalItem.allowed_tools] --> C[Executor sets MCP_ALLOWED_TOOLS]
-  C --> M[MCPClient filters list_tools and call_tool]
-  M -- outside allowlist --> F[Hard fail]
-```
-### How to test
+# How to test
 
 ```bash
 uv run pytest -q
 ```
+

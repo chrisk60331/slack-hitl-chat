@@ -150,7 +150,7 @@ class AgentOrchestrator:
             if prompt_prefix
             else request.query
         )
-
+        print(f"Getting approval status for request_id: {approval_request_id}")
         if approval_request_id:
             try:
                 item = get_approval_status(approval_request_id)

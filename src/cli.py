@@ -8,18 +8,18 @@ import json
 import click
 from dotenv import load_dotenv
 
-from .config_store import (
+from src.config_store import (
     MCPServer,
     put_mcp_servers,
     put_policies,
 )
-from .mcp_client import MCPClient
-from .orchestrator import (
+from src.mcp_client import MCPClient
+from src.orchestrator import (
     AgentOrchestrator,
     OrchestratorRequest,
     OrchestratorResult,
 )
-from .policy import DEFAULT_RULES, PolicyRule
+from src.policy import DEFAULT_RULES, PolicyRule
 
 load_dotenv()
 

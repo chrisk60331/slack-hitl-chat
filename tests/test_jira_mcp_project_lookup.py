@@ -1,4 +1,4 @@
-from jira_mcp.server import _select_best_project_match
+from jira_mcp.core import _select_best_project_match
 
 
 def test_select_best_project_match_priority_exact_then_startswith_then_contains():
