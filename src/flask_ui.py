@@ -14,6 +14,10 @@ from .config_store import (
 )
 from src.policy import ApprovalCategory, PolicyRule
 from .dynamodb_utils import get_approval_table
+from .analytics import (
+    aggregate_requests_by_status,
+    aggregate_requests_by_user,
+)
 
 
 def create_app() -> Flask:
@@ -193,6 +197,37 @@ def create_app() -> Flask:
 
         items = sorted(items, key=_ts_key, reverse=True)[:limit]
         return render_template("approvals.html", items=items)
+
+    # --- Analytics ---
+    @app.get("/analytics")
+    def analytics() -> str:
+        limit = int(request.args.get("limit", "500"))
+        try:
+            table = get_approval_table()
+            # Scan a window of recent items for aggregation
+            items: list[dict[str, Any]] = []
+            start_key: dict[str, Any] | None = None
+            max_scan: int = max(limit * 5, 500)
+            while True:
+                scan_kwargs: dict[str, Any] = {"Limit": min(500, max_scan)}
+                if start_key:
+                    scan_kwargs["ExclusiveStartKey"] = start_key
+                resp = table.scan(**scan_kwargs)
+                items.extend(resp.get("Items", []))
+                start_key = resp.get("LastEvaluatedKey")
+                if not start_key or len(items) >= max_scan:
+                    break
+        except Exception:
+            items = []
+
+        by_user = aggregate_requests_by_user(items)
+        by_status = aggregate_requests_by_status(items)
+        return render_template(
+            "analytics.html",
+            by_user=by_user,
+            by_status=by_status,
+            total=len(items),
+        )
 
     return app
 

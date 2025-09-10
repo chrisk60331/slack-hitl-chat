@@ -12,10 +12,7 @@
 - Config management: config_store for MCP servers and policies; CLI migration from .env/defaults.
 - Slack Block Kit helpers: Post/edit, JSON-to-blocks parsing.
 - Testing + DX: Extensive pytest suite; uv workflows; Docker support; rich environment.example.
-
-### Recent updates
-
-- Approvals Audit page now displays the requester alongside other fields.
+- New Admin Analytics page (`/admin/analytics`): shows counts of approval requests by requester and by status over a recent scan window.
 
 ### What it does
 

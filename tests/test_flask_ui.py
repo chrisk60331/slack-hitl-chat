@@ -48,6 +48,7 @@ def test_flask_routes_smoke() -> None:
     assert client.get("/servers").status_code == 200
     assert client.get("/policies").status_code == 200
     assert client.get("/approvals").status_code == 200
+    assert client.get("/analytics").status_code == 200
 
 
 def test_servers_save_and_load_disabled_tools(
