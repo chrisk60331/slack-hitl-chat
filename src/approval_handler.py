@@ -550,7 +550,7 @@ def send_notifications(
             )
             if post_message("foo", message_content["title"], blocks=blocks):
                 notification_sent = True
-        if action in [ApprovalOutcome.ALLOW, ApprovalOutcome.DENY]:
+        if action in [ApprovalOutcome.ALLOW, ApprovalOutcome.DENY] and approval_status and approver:
             post_message("foo", text=f"Request {request_id[:REQUEST_ID_LENGTH]}: {approval_status} by {approver}")
 
 
