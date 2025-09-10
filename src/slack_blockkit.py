@@ -70,14 +70,14 @@ def post_message_with_response(
 
 def post_message(
     channel: str,
-    text: str,
+    text: str = "",
     *,
     token: str | None = None,
     blocks: list[dict[str, Any]] | None = None,
     thread_ts: str | None = None,
 ) -> bool:
     """Post a Block Kit message to a channel (with optional thread)."""
-    payload = {"blocks": blocks}
+    payload = {"blocks": blocks} if blocks else {"text": text}
     resp = requests.post(
         os.environ.get("SLACK_WEBHOOK_URL"),
         data=json.dumps(payload),
@@ -140,7 +140,7 @@ def build_approval_blocks(
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Request ID:*\n{request_id}"},
+                {"type": "mrkdwn", "text": f"*Request ID:*\n{request_id[:10]}"},
                 {"type": "mrkdwn", "text": f"*Requester:*\n{requester}"},
             ],
         },
