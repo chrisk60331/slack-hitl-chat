@@ -56,3 +56,40 @@ npx nx serve console
 uv run pytest -q
 ```
 
+### Jira MCP updates
+
+- New project creation fields:
+  - `managementStyle`: `team` (default) or `company`.
+  - `requesterEmail`: requester will be auto-added as Project Admin when provided.
+  - `projectTemplateKey`: optional; when omitted a sensible default is chosen from `managementStyle`.
+
+- Returned fields on create:
+  - `projectId`, `projectKey`, `selfUrl`, `managementStyle`, `projectTemplateKey`
+  - `projectUrl`, `boardUrl`, `boardId` (best-effort discovery)
+  - `requesterAddedAsAdmin` (bool)
+
+- Examples:
+```python
+from jira_mcp.server import create_project
+from jira_mcp.models import CreateProjectRequest
+
+# Team-managed (default), Kanban template selected automatically
+req = CreateProjectRequest(
+    name="INSITE POC",
+    key="INSITEPOC",
+    projectTypeKey="software",
+    managementStyle="team",
+    requesterEmail="owner@example.com",
+)
+res = create_project(req)
+
+# Company-managed; classic board URL will be returned
+req2 = CreateProjectRequest(
+    name="Classic Project",
+    key="CLAS",
+    projectTypeKey="software",
+    managementStyle="company",
+)
+res2 = create_project(req2)
+```
+

@@ -44,6 +44,38 @@ def _resolve_project_template_key(key_or_alias: str) -> str:
             f"Unknown project template alias '{key_or_alias}'. Supported aliases: {supported}, or pass a full template key."
         )
     return resolved
+def _default_template_for_style(style: str, project_type_key: str) -> str:
+    """Return a default projectTemplateKey given a management style.
+
+    For team-managed (default), prefer agility kanban. For company-managed, prefer classic kanban.
+    """
+    normalized_style = (style or "team").strip().lower()
+    # Only software projects supported by defaults for now
+    if project_type_key != "software":
+        # Fall back to Jira's basic template choices
+        return "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban"
+    if normalized_style == "company":
+        return "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic"
+    return "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban"
+
+
+def _compute_board_and_project_urls(
+    base_url: str, project_key: str, board_id: int | None, management_style: str
+) -> dict[str, str | int | None]:
+    """Compute friendly URLs for the project and board.
+
+    Returns keys: projectUrl, boardUrl, boardId
+    """
+    base = base_url.rstrip("/")
+    project_key_str = str(project_key)
+    # Prefer the standard web UI URLs (no '/c' segment)
+    project_url = f"{base}/jira/software/projects/{project_key_str}/summary"
+    if board_id is not None:
+        board_url = f"{base}/jira/software/projects/{project_key_str}/boards/{board_id}"
+    else:
+        board_url = f"{base}/jira/software/projects/{project_key_str}/boards"
+    return {"projectUrl": project_url, "boardUrl": board_url, "boardId": board_id}
+
 
 
 def _jira_client():
@@ -294,16 +326,7 @@ def _rows_to_issues(df: pl.DataFrame, field_map: dict[str, str], defaults: dict[
         issues.append({"fields": {"summary": summary, "issuetype": {"name": issue_type_value}, **fields}})
 
     return issues
-
-
- 
-
-
- 
-
-
- 
-
+    
 
 def _select_role_url(roles_map: dict[str, str], preferred_names: list[str]) -> tuple[str, str] | None:
     if not roles_map:

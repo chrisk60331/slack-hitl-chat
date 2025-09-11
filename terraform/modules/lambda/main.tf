@@ -68,6 +68,26 @@ data "archive_file" "src" {
   source_dir  = "${var.source_path}src/"
   output_path = "${var.source_path}/repo.zip"
 }
+data "archive_file" "jira_mcp" {
+  type        = "zip"
+  source_dir  = "${var.source_path}jira_mcp/"
+  output_path = "${var.source_path}/jira_mcp.zip"
+}
+data "archive_file" "google_mcp" {
+  type        = "zip"
+  source_dir  = "${var.source_path}google_mcp/"
+  output_path = "${var.source_path}/google_mcp.zip"
+}
+data "archive_file" "totp_mcp" {
+  type        = "zip"
+  source_dir  = "${var.source_path}totp_mcp/"
+  output_path = "${var.source_path}/totp_mcp.zip"
+}
+data "archive_file" "gif_mcp" {
+  type        = "zip"
+  source_dir  = "${var.source_path}gif_mcp/"
+  output_path = "${var.source_path}/gif_mcp.zip"
+}
 
 # Build and push Docker image
 resource "docker_image" "lambda" {
@@ -89,6 +109,10 @@ resource "docker_image" "lambda" {
     dockerfile_sha = filesha256("${var.source_path}/Dockerfile")
     pyproject_sha  = filesha256("${var.source_path}/pyproject.toml")
     src_sha        = filesha256(data.archive_file.src.output_path)
+    jira_mcp_sha   = filesha256(data.archive_file.jira_mcp.output_path)
+    google_mcp_sha = filesha256(data.archive_file.google_mcp.output_path)
+    totp_mcp_sha   = filesha256(data.archive_file.totp_mcp.output_path)
+    gif_mcp_sha    = filesha256(data.archive_file.gif_mcp.output_path)
   }
 }
 

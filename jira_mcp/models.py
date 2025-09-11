@@ -26,7 +26,12 @@ class CreateProjectRequest(BaseModel):
     name: str
     key: str
     projectTypeKey: str = Field(pattern="^(software|service_desk|business)$")
-    projectTemplateKey: str
+    # If omitted, defaults to a team-managed template based on managementStyle
+    projectTemplateKey: str | None = None
+    # Choose team-managed (default) or company-managed behavior
+    managementStyle: str = Field(default="team", pattern="^(team)$")
+    # Auto-grant admin to this requester email after creation (if provided)
+    requesterEmail: str | None = None
     leadAccountId: str | None = None
     leadEmail: str | None = None
 

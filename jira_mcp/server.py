@@ -14,6 +14,8 @@ from jira_mcp.core import (
     _select_best_project_match,
     _lookup_account_id_by_email,
     _resolve_project_template_key,
+    _default_template_for_style,
+    _compute_board_and_project_urls,
     _rows_to_issues,
     _get_project_role_url,
     _load_csv_from_path,
@@ -174,22 +176,58 @@ def create_project(request: CreateProjectRequest) -> dict[str, Any]:
 
     # Use REST via python-jira session for reliability
     url = jira._get_url("project")
+    # Determine template: explicit key dominates; otherwise default by style
+    template_key: str
+    if request.projectTemplateKey and request.projectTemplateKey.strip():
+        template_key = _resolve_project_template_key(request.projectTemplateKey)
+    else:
+        template_key = _default_template_for_style(
+            request.managementStyle, request.projectTypeKey
+        )
+
     payload = {
         "key": request.key,
         "name": request.name,
         "projectTypeKey": request.projectTypeKey,
-        "projectTemplateKey": _resolve_project_template_key(request.projectTemplateKey),
+        "projectTemplateKey": template_key,
     }
     if lead_account_id:
         payload["leadAccountId"] = lead_account_id
     resp = jira._session.post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()
-    return {
-        "projectId": data.get("id"),
-        "projectKey": data.get("key"),
+    project_id = data.get("id")
+    project_key = data.get("key")
+    result: dict[str, Any] = {
+        "projectId": project_id,
+        "projectKey": project_key,
         "selfUrl": data.get("self"),
+        "managementStyle": request.managementStyle,
+        "projectTypeKey": request.projectTypeKey,
+        "projectTemplateKey": template_key,
     }
+
+    # Best-effort: add requester as admin if provided
+    if request.requesterEmail:
+        try:
+            add_result = add_project_admin(
+                AddProjectAdminRequest(projectKey=project_key, email=request.requesterEmail)
+            )
+            result["requesterAddedAsAdmin"] = bool(add_result.get("added"))
+        except Exception as e:
+            logger.warning(f"Failed to add requester as admin: {e}")
+            result["requesterAddedAsAdmin"] = False
+
+    # Try to discover board and compute friendly URLs
+    boards = jira.boards(projectKeyOrID=project_key)
+    board_id = boards[0].id
+    urls = _compute_board_and_project_urls(
+        os.environ.get("JIRA_BASE_URL", ""), project_key, board_id, request.managementStyle
+    )
+    result.update(urls)
+
+    logger.critical(f"Result: {result}")
+    return result
 
 
 @mcp.tool(

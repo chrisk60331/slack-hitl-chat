@@ -15,6 +15,7 @@ from typing import Any
 import requests
 
 from src.policy import ApprovalOutcome
+from src.constants import REQUEST_ID_LENGTH
 
 
 def _slack_api(
@@ -215,7 +216,7 @@ def get_header_and_context(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f"*Request ID:* `{str(request_id or '')}`",
+                    "text": f"*Request ID:* `{str(request_id[:REQUEST_ID_LENGTH] or '')}`",
                 }
             ],
         },
